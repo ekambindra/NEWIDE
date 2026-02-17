@@ -88,6 +88,25 @@ type ReviewerFinding = {
   confidence: number;
 };
 
+type OwnershipMatch = {
+  file: string;
+  owners: string[];
+  matchedPattern: string | null;
+};
+
+type ChangelogDraft = {
+  range: string;
+  generatedAt: string;
+  sections: Array<{ title: string; items: string[] }>;
+  markdown: string;
+};
+
+type ReleaseNotesDraft = {
+  version: string;
+  generatedAt: string;
+  markdown: string;
+};
+
 const watchers = new Map<string, { watcher: FSWatcher; timer: NodeJS.Timeout | null }>();
 const MAX_FILE_BYTES = 1024 * 1024 * 2;
 
@@ -96,7 +115,7 @@ function nowIso(): string {
 }
 
 function runtimeDataRoot(): string {
-  return join(app.getPath("userData"), "enterprise-ai-ide");
+  return join(app.getPath("userData"), "atlas-meridian");
 }
 
 function checkpointsRoot(): string {
@@ -399,6 +418,193 @@ async function runReviewerMode(
       return severityRank[b.severity] - severityRank[a.severity] || a.file.localeCompare(b.file);
     })
     .slice(0, 80);
+}
+
+function normalizeRepoPath(path: string): string {
+  return path.replace(/\\/g, "/").replace(/^\.\/+/, "");
+}
+
+function globToRegex(pattern: string): RegExp {
+  const normalized = pattern
+    .trim()
+    .replace(/^\/+/, "")
+    .replace(/[.+^${}()|[\]\\]/g, "\\$&")
+    .replace(/\*\*/g, "::DOUBLE_STAR::")
+    .replace(/\*/g, "[^/]*")
+    .replace(/::DOUBLE_STAR::/g, ".*")
+    .replace(/\?/g, ".");
+
+  if (!pattern.includes("/")) {
+    return new RegExp(`(^|.*/)${normalized}$`);
+  }
+  if (pattern.endsWith("/")) {
+    return new RegExp(`^${normalized}.*$`);
+  }
+  return new RegExp(`^${normalized}$`);
+}
+
+async function parseCodeowners(root: string): Promise<Array<{ pattern: string; owners: string[]; regex: RegExp }>> {
+  const candidatePaths = [
+    join(root, ".github", "CODEOWNERS"),
+    join(root, "CODEOWNERS"),
+    join(root, "docs", "CODEOWNERS")
+  ];
+  let sourcePath: string | null = null;
+  for (const path of candidatePaths) {
+    if (existsSync(path)) {
+      sourcePath = path;
+      break;
+    }
+  }
+  if (!sourcePath) {
+    return [];
+  }
+
+  const body = await fs.readFile(sourcePath, "utf8");
+  const entries: Array<{ pattern: string; owners: string[]; regex: RegExp }> = [];
+  for (const line of body.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) {
+      continue;
+    }
+    const tokens = trimmed.split(/\s+/);
+    const pattern = tokens[0] ?? "";
+    const owners = tokens.slice(1).filter(Boolean);
+    if (!pattern || owners.length === 0) {
+      continue;
+    }
+    entries.push({
+      pattern,
+      owners,
+      regex: globToRegex(pattern)
+    });
+  }
+  return entries;
+}
+
+async function mapOwnership(root: string, files: string[]): Promise<OwnershipMatch[]> {
+  const entries = await parseCodeowners(root);
+  return files.map((file) => {
+    const normalized = normalizeRepoPath(file);
+    let owners: string[] = [];
+    let matchedPattern: string | null = null;
+    for (const entry of entries) {
+      if (entry.regex.test(normalized)) {
+        owners = entry.owners;
+        matchedPattern = entry.pattern;
+      }
+    }
+    return {
+      file: normalized,
+      owners,
+      matchedPattern
+    };
+  });
+}
+
+async function generateChangelogDraft(root: string, sinceRef?: string): Promise<ChangelogDraft> {
+  const range = sinceRef?.trim() ? `${sinceRef.trim()}..HEAD` : "HEAD~40..HEAD";
+  const args = ["log", "--pretty=format:%h|%s", range];
+  let stdout = "";
+  try {
+    const result = await execFileAsync("git", args, { cwd: root });
+    stdout = result.stdout;
+  } catch (error) {
+    const anyErr = error as { stdout?: string; stderr?: string };
+    stdout = anyErr.stdout ?? "";
+    if (!stdout) {
+      throw new Error(anyErr.stderr ?? "unable to generate changelog");
+    }
+  }
+
+  const categoryMap: Record<string, string> = {
+    feat: "Features",
+    fix: "Fixes",
+    docs: "Documentation",
+    refactor: "Refactors",
+    perf: "Performance",
+    test: "Tests",
+    chore: "Chores"
+  };
+  const sectionBuckets = new Map<string, string[]>();
+  const otherKey = "Other";
+
+  for (const line of stdout.split("\n").filter(Boolean)) {
+    const separator = line.indexOf("|");
+    if (separator === -1) {
+      continue;
+    }
+    const hash = line.slice(0, separator);
+    const subject = line.slice(separator + 1).trim();
+    const conventional = subject.match(/^([a-zA-Z]+)(\([^)]+\))?:\s*(.+)$/);
+    const rawType = conventional?.[1]?.toLowerCase();
+    const section = (rawType && categoryMap[rawType]) || otherKey;
+    const message = conventional?.[3] ?? subject;
+    const list = sectionBuckets.get(section) ?? [];
+    list.push(`- ${message} (${hash})`);
+    sectionBuckets.set(section, list);
+  }
+
+  const sections = [...sectionBuckets.entries()].map(([title, items]) => ({ title, items }));
+  sections.sort((a, b) => {
+    if (a.title === otherKey) return 1;
+    if (b.title === otherKey) return -1;
+    return a.title.localeCompare(b.title);
+  });
+
+  const markdownLines = [`# Changelog Draft`, "", `Range: \`${range}\``, ""];
+  for (const section of sections) {
+    markdownLines.push(`## ${section.title}`);
+    markdownLines.push(...section.items);
+    markdownLines.push("");
+  }
+  if (sections.length === 0) {
+    markdownLines.push("No commits found for the selected range.");
+  }
+
+  return {
+    range,
+    generatedAt: nowIso(),
+    sections,
+    markdown: markdownLines.join("\n")
+  };
+}
+
+async function generateReleaseNotesDraft(
+  root: string,
+  version: string,
+  highlights: string[]
+): Promise<ReleaseNotesDraft> {
+  const changelog = await generateChangelogDraft(root);
+  const notes: string[] = [];
+  notes.push(`# Atlas Meridian ${version}`);
+  notes.push(`Release date: ${new Date().toISOString().slice(0, 10)}`);
+  notes.push("");
+  notes.push("## Highlights");
+  const cleanHighlights = highlights.map((item) => item.trim()).filter(Boolean);
+  if (cleanHighlights.length === 0) {
+    notes.push("- Stability, performance, and workflow improvements.");
+  } else {
+    for (const item of cleanHighlights) {
+      notes.push(`- ${item}`);
+    }
+  }
+  notes.push("");
+  notes.push("## Changes");
+  for (const section of changelog.sections) {
+    notes.push(`### ${section.title}`);
+    notes.push(...section.items.slice(0, 12));
+    notes.push("");
+  }
+  if (changelog.sections.length === 0) {
+    notes.push("- No changelog entries available.");
+  }
+
+  return {
+    version,
+    generatedAt: nowIso(),
+    markdown: notes.join("\n")
+  };
 }
 
 async function loadGitIgnore(root: string): Promise<ReturnType<typeof ignore>> {
@@ -1173,6 +1379,64 @@ app.whenReady().then(async () => {
         metadata: { findings: findings.length }
       });
       return findings;
+    }
+  );
+
+  ipcMain.handle(
+    "team:ownership:map",
+    async (
+      _event,
+      payload: { root: string; files: string[] }
+    ) => {
+      const mapping = await mapOwnership(payload.root, payload.files);
+      await appendAuditEvent({
+        action: "team.ownership.map",
+        target: payload.root,
+        decision: "executed",
+        reason: "ownership mapping generated",
+        metadata: { files: payload.files.length, mapped: mapping.length }
+      });
+      return mapping;
+    }
+  );
+
+  ipcMain.handle(
+    "team:changelog:draft",
+    async (
+      _event,
+      payload: { root: string; sinceRef?: string }
+    ) => {
+      const draft = await generateChangelogDraft(payload.root, payload.sinceRef);
+      await appendAuditEvent({
+        action: "team.changelog.draft",
+        target: payload.root,
+        decision: "executed",
+        reason: "changelog draft generated",
+        metadata: { range: draft.range, sections: draft.sections.length }
+      });
+      return draft;
+    }
+  );
+
+  ipcMain.handle(
+    "team:release-notes:draft",
+    async (
+      _event,
+      payload: { root: string; version: string; highlights: string[] }
+    ) => {
+      const draft = await generateReleaseNotesDraft(
+        payload.root,
+        payload.version,
+        payload.highlights
+      );
+      await appendAuditEvent({
+        action: "team.release_notes.draft",
+        target: payload.root,
+        decision: "executed",
+        reason: "release notes draft generated",
+        metadata: { version: draft.version }
+      });
+      return draft;
     }
   );
 

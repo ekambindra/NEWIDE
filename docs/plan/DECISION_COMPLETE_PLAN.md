@@ -1,4 +1,4 @@
-# Enterprise AI IDE Decision-Complete Plan
+# Atlas Meridian Decision-Complete Plan
 
 ## Product Summary
 

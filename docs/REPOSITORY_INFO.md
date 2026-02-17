@@ -4,9 +4,9 @@ This file is updated when repository setup is completed.
 
 - Local root: `/Users/ekambindra/NEWIDE`
 - GitHub owner: `ekambindra`
-- Remote repository: `https://github.com/ekambindra/NEWIDE`
+- Remote repository: `https://github.com/ekambindra/atlas-meridian`
 - Default branch: `main`
-- Remote: `origin` -> `https://github.com/ekambindra/NEWIDE.git`
+- Remote: `origin` -> `https://github.com/ekambindra/atlas-meridian.git`
 
 ## Linked Documentation
 

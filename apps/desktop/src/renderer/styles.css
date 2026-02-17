@@ -305,6 +305,16 @@ textarea {
   background: rgba(20, 24, 31, 0.7);
 }
 
+.checkpoint-card pre {
+  margin: 0;
+  max-height: 220px;
+  overflow: auto;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(12, 17, 22, 0.85);
+}
+
 .checkpoint-card code,
 pre,
 code {

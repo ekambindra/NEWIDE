@@ -2,8 +2,8 @@
 
 ## Current Completion
 
-- Completed features: 100/170
-- Completion percentage: 58.8%
+- Completed features: 103/170
+- Completion percentage: 60.6%
 
 ## Latest Implemented Increments
 
@@ -20,6 +20,10 @@
 11. Reviewer mode with grounded file/line findings (TEAM-003).
 12. Reviewer actionable guidance formatting and severity scoring (TEAM-004).
 13. Reviewer risk scoring surfaced in UI (TEAM-005).
+14. Ownership mapping from CODEOWNERS with per-file owner resolution (TEAM-006).
+15. Changelog draft generator from git history (TEAM-007).
+16. Release notes draft generator with highlights and categorized changes (TEAM-008).
+17. Product branding and package metadata renamed to Atlas Meridian.
 
 ## Verification Commands
 

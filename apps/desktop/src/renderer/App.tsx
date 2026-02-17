@@ -87,6 +87,25 @@ type ReviewerFinding = {
   confidence: number;
 };
 
+type OwnershipMatch = {
+  file: string;
+  owners: string[];
+  matchedPattern: string | null;
+};
+
+type ChangelogDraft = {
+  range: string;
+  generatedAt: string;
+  sections: Array<{ title: string; items: string[] }>;
+  markdown: string;
+};
+
+type ReleaseNotesDraft = {
+  version: string;
+  generatedAt: string;
+  markdown: string;
+};
+
 const panelTabs: PanelTab[] = ["agent", "plan", "diff", "checkpoints"];
 const bottomTabs: BottomTab[] = ["terminal", "tests", "logs"];
 const leftTabs: LeftTab[] = ["files", "search"];
@@ -236,6 +255,13 @@ export function App() {
   const [decisionConsequences, setDecisionConsequences] = useState("faster delivery\\nrequires monitoring");
   const [decisionFiles, setDecisionFiles] = useState("");
   const [reviewerFiles, setReviewerFiles] = useState("");
+  const [ownershipFiles, setOwnershipFiles] = useState("");
+  const [ownershipMap, setOwnershipMap] = useState<OwnershipMatch[]>([]);
+  const [changelogSinceRef, setChangelogSinceRef] = useState("");
+  const [changelogDraft, setChangelogDraft] = useState<ChangelogDraft | null>(null);
+  const [releaseVersion, setReleaseVersion] = useState("v0.1.0");
+  const [releaseHighlights, setReleaseHighlights] = useState("");
+  const [releaseNotesDraft, setReleaseNotesDraft] = useState<ReleaseNotesDraft | null>(null);
   const [multiAgentGoal, setMultiAgentGoal] = useState(
     "Implement feature increment with docs, tests, and risk checks"
   );
@@ -721,6 +747,57 @@ export function App() {
     setLogs((prev) => [`[reviewer] ${findings.length} findings`, ...prev]);
   };
 
+  const runOwnershipMapping = async () => {
+    if (!workspaceRoot) {
+      return;
+    }
+    const files = ownershipFiles
+      .split("\n")
+      .map((item) => item.trim())
+      .filter(Boolean);
+    if (files.length === 0) {
+      setOwnershipMap([]);
+      return;
+    }
+    const mapping = await window.ide.mapOwnership({
+      root: workspaceRoot,
+      files
+    });
+    setOwnershipMap(mapping);
+    await refreshAudit();
+    setLogs((prev) => [`[ownership] mapped ${mapping.length} files`, ...prev]);
+  };
+
+  const runChangelogDraft = async () => {
+    if (!workspaceRoot) {
+      return;
+    }
+    const draft = await window.ide.draftChangelog({
+      root: workspaceRoot,
+      sinceRef: changelogSinceRef.trim() || undefined
+    });
+    setChangelogDraft(draft);
+    await refreshAudit();
+    setLogs((prev) => [`[changelog] generated ${draft.sections.length} sections`, ...prev]);
+  };
+
+  const runReleaseNotesDraft = async () => {
+    if (!workspaceRoot) {
+      return;
+    }
+    const draft = await window.ide.draftReleaseNotes({
+      root: workspaceRoot,
+      version: releaseVersion.trim() || "v0.1.0",
+      highlights: releaseHighlights
+        .split("\n")
+        .map((item) => item.trim())
+        .filter(Boolean)
+    });
+    setReleaseNotesDraft(draft);
+    await refreshAudit();
+    setLogs((prev) => [`[release-notes] generated for ${draft.version}`, ...prev]);
+  };
+
   const breadcrumbs = activeTab ? activeTab.split("/") : [];
 
   if (typeof window.ide === "undefined") {
@@ -728,11 +805,11 @@ export function App() {
   }
 
   return (
-    <div className="app-shell" aria-label="Enterprise AI IDE">
+    <div className="app-shell" aria-label="Atlas Meridian">
       <header className="topbar">
         <div className="logo-wrap">
           <span className="logo-dot" />
-          <strong>Atlas IDE</strong>
+          <strong>Atlas Meridian</strong>
         </div>
         <div className="header-actions">
           <button onClick={openWorkspace}>Open Workspace</button>
@@ -1057,6 +1134,69 @@ export function App() {
                 </div>
               ))}
               {reviewerFindings.length === 0 ? <p className="empty">No reviewer findings yet.</p> : null}
+
+              <h4>Ownership Mapping</h4>
+              <div className="checkpoint-card">
+                <textarea
+                  value={ownershipFiles}
+                  onChange={(event) => setOwnershipFiles(event.target.value)}
+                  placeholder="Files to map owners (one per line)"
+                  style={{ minHeight: 80 }}
+                />
+                <button onClick={() => { void runOwnershipMapping(); }}>Map Owners</button>
+              </div>
+              {ownershipMap.map((entry) => (
+                <div key={entry.file} className="checkpoint-card">
+                  <strong>{entry.file}</strong>
+                  <code>pattern: {entry.matchedPattern ?? "none"}</code>
+                  <code>owners: {entry.owners.join(", ") || "unassigned"}</code>
+                </div>
+              ))}
+              {ownershipMap.length === 0 ? <p className="empty">No ownership mapping yet.</p> : null}
+
+              <h4>Changelog Draft</h4>
+              <div className="checkpoint-card">
+                <input
+                  value={changelogSinceRef}
+                  onChange={(event) => setChangelogSinceRef(event.target.value)}
+                  placeholder="Since git ref (optional, e.g. v0.1.0)"
+                />
+                <button onClick={() => { void runChangelogDraft(); }}>Generate Changelog</button>
+              </div>
+              {changelogDraft ? (
+                <div className="checkpoint-card">
+                  <strong>Range: {changelogDraft.range}</strong>
+                  <code>Generated: {changelogDraft.generatedAt}</code>
+                  <pre>{changelogDraft.markdown}</pre>
+                </div>
+              ) : (
+                <p className="empty">No changelog draft generated yet.</p>
+              )}
+
+              <h4>Release Notes Draft</h4>
+              <div className="checkpoint-card">
+                <input
+                  value={releaseVersion}
+                  onChange={(event) => setReleaseVersion(event.target.value)}
+                  placeholder="Release version (e.g. v0.2.0)"
+                />
+                <textarea
+                  value={releaseHighlights}
+                  onChange={(event) => setReleaseHighlights(event.target.value)}
+                  placeholder="Highlights (one per line)"
+                  style={{ minHeight: 80 }}
+                />
+                <button onClick={() => { void runReleaseNotesDraft(); }}>Generate Release Notes</button>
+              </div>
+              {releaseNotesDraft ? (
+                <div className="checkpoint-card">
+                  <strong>{releaseNotesDraft.version}</strong>
+                  <code>Generated: {releaseNotesDraft.generatedAt}</code>
+                  <pre>{releaseNotesDraft.markdown}</pre>
+                </div>
+              ) : (
+                <p className="empty">No release notes draft generated yet.</p>
+              )}
             </div>
           ) : null}
           {panelTab === "diff" ? (

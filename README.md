@@ -1,4 +1,4 @@
-# Enterprise AI IDE
+# Atlas Meridian
 
 Standalone Electron + TypeScript IDE with deterministic agent execution, enterprise policy controls, and benchmark-driven quality gates.
 

@@ -81,6 +81,25 @@ type ReviewerFinding = {
   confidence: number;
 };
 
+type OwnershipMatch = {
+  file: string;
+  owners: string[];
+  matchedPattern: string | null;
+};
+
+type ChangelogDraft = {
+  range: string;
+  generatedAt: string;
+  sections: Array<{ title: string; items: string[] }>;
+  markdown: string;
+};
+
+type ReleaseNotesDraft = {
+  version: string;
+  generatedAt: string;
+  markdown: string;
+};
+
 const api = {
   openWorkspace: (): Promise<string | null> => ipcRenderer.invoke("workspace:open"),
   getTree: (root: string): Promise<TreeNode[]> => ipcRenderer.invoke("workspace:tree", root),
@@ -135,6 +154,15 @@ const api = {
   }): Promise<DecisionLogEntry> => ipcRenderer.invoke("team:decision:add", payload),
   runReviewerMode: (payload: { root: string; files?: string[] }): Promise<ReviewerFinding[]> =>
     ipcRenderer.invoke("team:review:run", payload),
+  mapOwnership: (payload: { root: string; files: string[] }): Promise<OwnershipMatch[]> =>
+    ipcRenderer.invoke("team:ownership:map", payload),
+  draftChangelog: (payload: { root: string; sinceRef?: string }): Promise<ChangelogDraft> =>
+    ipcRenderer.invoke("team:changelog:draft", payload),
+  draftReleaseNotes: (payload: {
+    root: string;
+    version: string;
+    highlights: string[];
+  }): Promise<ReleaseNotesDraft> => ipcRenderer.invoke("team:release-notes:draft", payload),
   onWorkspaceChanged: (listener: (payload: { root: string; path: string; ts: number }) => void): (() => void) => {
     const wrapped = (_event: unknown, payload: { root: string; path: string; ts: number }) => listener(payload);
     ipcRenderer.on("workspace:changed", wrapped);
