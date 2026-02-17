@@ -59,6 +59,35 @@ type AuditEvent = {
   checksum: string;
 };
 
+type TeamMemoryEntry = {
+  id: string;
+  ts: string;
+  title: string;
+  content: string;
+  tags: string[];
+};
+
+type DecisionLogEntry = {
+  decision_id: string;
+  ts: string;
+  title: string;
+  context: string;
+  options: string[];
+  chosen: string;
+  consequences: string[];
+  related_files: string[];
+};
+
+type ReviewerFinding = {
+  id: string;
+  file: string;
+  line: number;
+  title: string;
+  body: string;
+  severity: "low" | "medium" | "high";
+  confidence: number;
+};
+
 const watchers = new Map<string, { watcher: FSWatcher; timer: NodeJS.Timeout | null }>();
 const MAX_FILE_BYTES = 1024 * 1024 * 2;
 
@@ -76,6 +105,14 @@ function checkpointsRoot(): string {
 
 function auditFilePath(): string {
   return join(runtimeDataRoot(), "audit", "events.jsonl");
+}
+
+function teamMemoryPath(): string {
+  return join(runtimeDataRoot(), "team", "memory.json");
+}
+
+function decisionLogPath(): string {
+  return join(runtimeDataRoot(), "team", "decisions.json");
 }
 
 function isWithin(root: string, target: string): boolean {
@@ -186,6 +223,182 @@ async function exportAudit(): Promise<{ path: string; count: number }> {
   await fs.writeFile(targetPath, content, "utf8");
   const count = content.trim() ? content.trim().split("\n").length : 0;
   return { path: targetPath, count };
+}
+
+async function readJsonArray<T>(path: string): Promise<T[]> {
+  if (!existsSync(path)) {
+    return [];
+  }
+  try {
+    const raw = await fs.readFile(path, "utf8");
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+    return parsed as T[];
+  } catch {
+    return [];
+  }
+}
+
+async function writeJsonArray<T>(path: string, value: T[]): Promise<void> {
+  await fs.mkdir(dirname(path), { recursive: true });
+  await fs.writeFile(path, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+}
+
+async function listTeamMemory(): Promise<TeamMemoryEntry[]> {
+  const entries = await readJsonArray<TeamMemoryEntry>(teamMemoryPath());
+  return entries.sort((a, b) => b.ts.localeCompare(a.ts));
+}
+
+async function addTeamMemory(input: {
+  title: string;
+  content: string;
+  tags: string[];
+}): Promise<TeamMemoryEntry> {
+  const entries = await readJsonArray<TeamMemoryEntry>(teamMemoryPath());
+  const next: TeamMemoryEntry = {
+    id: randomUUID(),
+    ts: nowIso(),
+    title: input.title.trim(),
+    content: input.content.trim(),
+    tags: input.tags
+      .map((tag) => tag.trim())
+      .filter(Boolean)
+      .slice(0, 12)
+  };
+  entries.unshift(next);
+  await writeJsonArray(teamMemoryPath(), entries.slice(0, 400));
+  return next;
+}
+
+async function listDecisionLogs(): Promise<DecisionLogEntry[]> {
+  const entries = await readJsonArray<DecisionLogEntry>(decisionLogPath());
+  return entries.sort((a, b) => b.ts.localeCompare(a.ts));
+}
+
+async function addDecisionLog(input: {
+  title: string;
+  context: string;
+  options: string[];
+  chosen: string;
+  consequences: string[];
+  relatedFiles: string[];
+}): Promise<DecisionLogEntry> {
+  const entries = await readJsonArray<DecisionLogEntry>(decisionLogPath());
+  const next: DecisionLogEntry = {
+    decision_id: randomUUID(),
+    ts: nowIso(),
+    title: input.title.trim(),
+    context: input.context.trim(),
+    options: input.options.map((option) => option.trim()).filter(Boolean),
+    chosen: input.chosen.trim(),
+    consequences: input.consequences
+      .map((consequence) => consequence.trim())
+      .filter(Boolean),
+    related_files: input.relatedFiles.map((file) => file.trim()).filter(Boolean)
+  };
+  entries.unshift(next);
+  await writeJsonArray(decisionLogPath(), entries.slice(0, 300));
+  return next;
+}
+
+async function runReviewerMode(
+  workspaceRoot: string,
+  onlyFiles: string[] = []
+): Promise<ReviewerFinding[]> {
+  const allowed = new Set(onlyFiles.filter(Boolean));
+  const findings: ReviewerFinding[] = [];
+  const seen = new Set<string>();
+
+  const addMatches = async (args: {
+    pattern: string;
+    title: string;
+    body: string;
+    severity: ReviewerFinding["severity"];
+    confidence: number;
+  }): Promise<void> => {
+    try {
+      const { stdout } = await execFileAsync("rg", [
+        "--line-number",
+        "--no-heading",
+        args.pattern,
+        workspaceRoot
+      ]);
+      for (const line of stdout.split("\n").filter(Boolean)) {
+        const first = line.indexOf(":");
+        const second = line.indexOf(":", first + 1);
+        if (first === -1 || second === -1) {
+          continue;
+        }
+        const file = relative(workspaceRoot, line.slice(0, first));
+        if (allowed.size > 0 && !allowed.has(file)) {
+          continue;
+        }
+        const lineNum = Number(line.slice(first + 1, second));
+        const key = `${file}:${lineNum}:${args.title}`;
+        if (seen.has(key)) {
+          continue;
+        }
+        seen.add(key);
+        findings.push({
+          id: randomUUID(),
+          file,
+          line: lineNum,
+          title: args.title,
+          body: `${args.body} Matched snippet: ${line.slice(second + 1).trim().slice(0, 140)}`,
+          severity: args.severity,
+          confidence: args.confidence
+        });
+      }
+    } catch (error) {
+      const maybe = error as { code?: number };
+      if (maybe.code === 1) {
+        return;
+      }
+      throw error;
+    }
+  };
+
+  await addMatches({
+    pattern: "\\bTODO\\b|\\bFIXME\\b",
+    title: "Unresolved TODO/FIXME",
+    body: "Open TODO/FIXME markers can hide incomplete behavior and should be resolved or tracked.",
+    severity: "medium",
+    confidence: 0.78
+  });
+  await addMatches({
+    pattern: "\\bany\\b",
+    title: "Potential type-safety gap",
+    body: "Use of `any` may reduce static guarantees; consider narrowing with explicit types.",
+    severity: "medium",
+    confidence: 0.72
+  });
+  await addMatches({
+    pattern: "console\\.log\\(",
+    title: "Debug logging in code path",
+    body: "Console logging may leak sensitive context or create noisy runtime output.",
+    severity: "low",
+    confidence: 0.66
+  });
+  await addMatches({
+    pattern: "@ts-ignore|eslint-disable",
+    title: "Suppressed static checks",
+    body: "Suppression directives should include justification and be periodically removed.",
+    severity: "high",
+    confidence: 0.81
+  });
+
+  return findings
+    .sort((a, b) => {
+      const severityRank: Record<ReviewerFinding["severity"], number> = {
+        high: 3,
+        medium: 2,
+        low: 1
+      };
+      return severityRank[b.severity] - severityRank[a.severity] || a.file.localeCompare(b.file);
+    })
+    .slice(0, 80);
 }
 
 async function loadGitIgnore(root: string): Promise<ReturnType<typeof ignore>> {
@@ -893,6 +1106,75 @@ app.whenReady().then(async () => {
   ipcMain.handle("audit:export", async () => {
     return exportAudit();
   });
+
+  ipcMain.handle("team:memory:list", async () => {
+    return listTeamMemory();
+  });
+
+  ipcMain.handle(
+    "team:memory:add",
+    async (
+      _event,
+      payload: { title: string; content: string; tags: string[] }
+    ) => {
+      const entry = await addTeamMemory(payload);
+      await appendAuditEvent({
+        action: "team.memory.add",
+        target: entry.title,
+        decision: "executed",
+        reason: "memory entry added",
+        metadata: { id: entry.id, tags: entry.tags }
+      });
+      return entry;
+    }
+  );
+
+  ipcMain.handle("team:decision:list", async () => {
+    return listDecisionLogs();
+  });
+
+  ipcMain.handle(
+    "team:decision:add",
+    async (
+      _event,
+      payload: {
+        title: string;
+        context: string;
+        options: string[];
+        chosen: string;
+        consequences: string[];
+        relatedFiles: string[];
+      }
+    ) => {
+      const entry = await addDecisionLog(payload);
+      await appendAuditEvent({
+        action: "team.decision.add",
+        target: entry.title,
+        decision: "executed",
+        reason: "decision log created",
+        metadata: { id: entry.decision_id, files: entry.related_files }
+      });
+      return entry;
+    }
+  );
+
+  ipcMain.handle(
+    "team:review:run",
+    async (
+      _event,
+      payload: { root: string; files?: string[] }
+    ) => {
+      const findings = await runReviewerMode(payload.root, payload.files ?? []);
+      await appendAuditEvent({
+        action: "team.review.run",
+        target: payload.root,
+        decision: "executed",
+        reason: "reviewer mode executed",
+        metadata: { findings: findings.length }
+      });
+      return findings;
+    }
+  );
 
   await createWindow();
 

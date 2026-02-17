@@ -52,6 +52,35 @@ type MultiAgentSummary = {
   }>;
 };
 
+type TeamMemoryEntry = {
+  id: string;
+  ts: string;
+  title: string;
+  content: string;
+  tags: string[];
+};
+
+type DecisionLogEntry = {
+  decision_id: string;
+  ts: string;
+  title: string;
+  context: string;
+  options: string[];
+  chosen: string;
+  consequences: string[];
+  related_files: string[];
+};
+
+type ReviewerFinding = {
+  id: string;
+  file: string;
+  line: number;
+  title: string;
+  body: string;
+  severity: "low" | "medium" | "high";
+  confidence: number;
+};
+
 const api = {
   openWorkspace: (): Promise<string | null> => ipcRenderer.invoke("workspace:open"),
   getTree: (root: string): Promise<TreeNode[]> => ipcRenderer.invoke("workspace:tree", root),
@@ -89,6 +118,23 @@ const api = {
   }> => ipcRenderer.invoke("checkpoints:detail", runId),
   getRecentAudit: (limit: number): Promise<AuditEvent[]> => ipcRenderer.invoke("audit:recent", limit),
   exportAudit: (): Promise<{ path: string; count: number }> => ipcRenderer.invoke("audit:export"),
+  listTeamMemory: (): Promise<TeamMemoryEntry[]> => ipcRenderer.invoke("team:memory:list"),
+  addTeamMemory: (payload: {
+    title: string;
+    content: string;
+    tags: string[];
+  }): Promise<TeamMemoryEntry> => ipcRenderer.invoke("team:memory:add", payload),
+  listDecisionLogs: (): Promise<DecisionLogEntry[]> => ipcRenderer.invoke("team:decision:list"),
+  addDecisionLog: (payload: {
+    title: string;
+    context: string;
+    options: string[];
+    chosen: string;
+    consequences: string[];
+    relatedFiles: string[];
+  }): Promise<DecisionLogEntry> => ipcRenderer.invoke("team:decision:add", payload),
+  runReviewerMode: (payload: { root: string; files?: string[] }): Promise<ReviewerFinding[]> =>
+    ipcRenderer.invoke("team:review:run", payload),
   onWorkspaceChanged: (listener: (payload: { root: string; path: string; ts: number }) => void): (() => void) => {
     const wrapped = (_event: unknown, payload: { root: string; path: string; ts: number }) => listener(payload);
     ipcRenderer.on("workspace:changed", wrapped);

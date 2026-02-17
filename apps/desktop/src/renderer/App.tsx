@@ -58,6 +58,35 @@ type AuditEvent = {
   checksum: string;
 };
 
+type TeamMemoryEntry = {
+  id: string;
+  ts: string;
+  title: string;
+  content: string;
+  tags: string[];
+};
+
+type DecisionLogEntry = {
+  decision_id: string;
+  ts: string;
+  title: string;
+  context: string;
+  options: string[];
+  chosen: string;
+  consequences: string[];
+  related_files: string[];
+};
+
+type ReviewerFinding = {
+  id: string;
+  file: string;
+  line: number;
+  title: string;
+  body: string;
+  severity: "low" | "medium" | "high";
+  confidence: number;
+};
+
 const panelTabs: PanelTab[] = ["agent", "plan", "diff", "checkpoints"];
 const bottomTabs: BottomTab[] = ["terminal", "tests", "logs"];
 const leftTabs: LeftTab[] = ["files", "search"];
@@ -194,6 +223,19 @@ export function App() {
   const [terminalReplay, setTerminalReplay] = useState<Array<{ runId: string; command: string; status: string; output: string }>>([]);
   const [auditEvents, setAuditEvents] = useState<AuditEvent[]>([]);
   const [pendingApprovalCommand, setPendingApprovalCommand] = useState<string | null>(null);
+  const [teamMemory, setTeamMemory] = useState<TeamMemoryEntry[]>([]);
+  const [decisionLogs, setDecisionLogs] = useState<DecisionLogEntry[]>([]);
+  const [reviewerFindings, setReviewerFindings] = useState<ReviewerFinding[]>([]);
+  const [memoryTitle, setMemoryTitle] = useState("Decision context");
+  const [memoryContent, setMemoryContent] = useState("");
+  const [memoryTags, setMemoryTags] = useState("context,architecture");
+  const [decisionTitle, setDecisionTitle] = useState("Adopt change strategy");
+  const [decisionContext, setDecisionContext] = useState("");
+  const [decisionOptions, setDecisionOptions] = useState("option-a\\noption-b");
+  const [decisionChosen, setDecisionChosen] = useState("option-a");
+  const [decisionConsequences, setDecisionConsequences] = useState("faster delivery\\nrequires monitoring");
+  const [decisionFiles, setDecisionFiles] = useState("");
+  const [reviewerFiles, setReviewerFiles] = useState("");
   const [multiAgentGoal, setMultiAgentGoal] = useState(
     "Implement feature increment with docs, tests, and risk checks"
   );
@@ -255,6 +297,15 @@ export function App() {
     setCheckpoints(items);
   };
 
+  const refreshTeamData = async () => {
+    const [memory, decisions] = await Promise.all([
+      window.ide.listTeamMemory(),
+      window.ide.listDecisionLogs()
+    ]);
+    setTeamMemory(memory);
+    setDecisionLogs(decisions);
+  };
+
   useEffect(() => {
     const keydown = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
@@ -290,6 +341,7 @@ export function App() {
     void refreshTree(workspaceRoot);
     void refreshAudit();
     void refreshCheckpoints();
+    void refreshTeamData();
     void window.ide.startWatch(workspaceRoot);
     const unsubscribe = window.ide.onWorkspaceChanged(async () => {
       await refreshTree(workspaceRoot);
@@ -305,6 +357,7 @@ export function App() {
   useEffect(() => {
     void refreshCheckpoints();
     void refreshAudit();
+    void refreshTeamData();
   }, []);
 
   useEffect(() => {
@@ -605,6 +658,69 @@ export function App() {
     ]);
   };
 
+  const createMemoryEntry = async () => {
+    if (!memoryTitle.trim() || !memoryContent.trim()) {
+      return;
+    }
+    await window.ide.addTeamMemory({
+      title: memoryTitle.trim(),
+      content: memoryContent.trim(),
+      tags: memoryTags
+        .split(",")
+        .map((tag) => tag.trim())
+        .filter(Boolean)
+    });
+    await refreshTeamData();
+    await refreshAudit();
+    setMemoryContent("");
+    setLogs((prev) => [`[team-memory] added ${memoryTitle}`, ...prev]);
+  };
+
+  const createDecisionLog = async () => {
+    if (!decisionTitle.trim() || !decisionContext.trim() || !decisionChosen.trim()) {
+      return;
+    }
+    await window.ide.addDecisionLog({
+      title: decisionTitle.trim(),
+      context: decisionContext.trim(),
+      options: decisionOptions
+        .split("\n")
+        .map((item) => item.trim())
+        .filter(Boolean),
+      chosen: decisionChosen.trim(),
+      consequences: decisionConsequences
+        .split("\n")
+        .map((item) => item.trim())
+        .filter(Boolean),
+      relatedFiles: decisionFiles
+        .split("\n")
+        .map((item) => item.trim())
+        .filter(Boolean)
+    });
+    await refreshTeamData();
+    await refreshAudit();
+    setDecisionContext("");
+    setDecisionFiles("");
+    setLogs((prev) => [`[decision-log] added ${decisionTitle}`, ...prev]);
+  };
+
+  const runReviewer = async () => {
+    if (!workspaceRoot) {
+      return;
+    }
+    const files = reviewerFiles
+      .split("\n")
+      .map((item) => item.trim())
+      .filter(Boolean);
+    const findings = await window.ide.runReviewerMode({
+      root: workspaceRoot,
+      files
+    });
+    setReviewerFindings(findings);
+    await refreshAudit();
+    setLogs((prev) => [`[reviewer] ${findings.length} findings`, ...prev]);
+  };
+
   const breadcrumbs = activeTab ? activeTab.split("/") : [];
 
   if (typeof window.ide === "undefined") {
@@ -844,6 +960,103 @@ export function App() {
                 </div>
               ))}
               {auditEvents.length === 0 ? <p className="empty">No audit events yet.</p> : null}
+
+              <h4>Project Memory</h4>
+              <div className="checkpoint-card">
+                <input
+                  value={memoryTitle}
+                  onChange={(event) => setMemoryTitle(event.target.value)}
+                  placeholder="Memory title"
+                />
+                <textarea
+                  value={memoryContent}
+                  onChange={(event) => setMemoryContent(event.target.value)}
+                  placeholder="Capture architecture, constraints, and context"
+                  style={{ minHeight: 90 }}
+                />
+                <input
+                  value={memoryTags}
+                  onChange={(event) => setMemoryTags(event.target.value)}
+                  placeholder="tags comma-separated"
+                />
+                <button onClick={() => { void createMemoryEntry(); }}>Add Memory</button>
+              </div>
+              {teamMemory.map((entry) => (
+                <div key={entry.id} className="checkpoint-card">
+                  <strong>{entry.title}</strong>
+                  <span>{entry.content}</span>
+                  <code>{entry.tags.join(", ")}</code>
+                </div>
+              ))}
+              {teamMemory.length === 0 ? <p className="empty">No memory entries yet.</p> : null}
+
+              <h4>Decision Logs (ADR)</h4>
+              <div className="checkpoint-card">
+                <input
+                  value={decisionTitle}
+                  onChange={(event) => setDecisionTitle(event.target.value)}
+                  placeholder="Decision title"
+                />
+                <textarea
+                  value={decisionContext}
+                  onChange={(event) => setDecisionContext(event.target.value)}
+                  placeholder="Context"
+                  style={{ minHeight: 90 }}
+                />
+                <textarea
+                  value={decisionOptions}
+                  onChange={(event) => setDecisionOptions(event.target.value)}
+                  placeholder="Options (one per line)"
+                  style={{ minHeight: 80 }}
+                />
+                <input
+                  value={decisionChosen}
+                  onChange={(event) => setDecisionChosen(event.target.value)}
+                  placeholder="Chosen option"
+                />
+                <textarea
+                  value={decisionConsequences}
+                  onChange={(event) => setDecisionConsequences(event.target.value)}
+                  placeholder="Consequences (one per line)"
+                  style={{ minHeight: 80 }}
+                />
+                <textarea
+                  value={decisionFiles}
+                  onChange={(event) => setDecisionFiles(event.target.value)}
+                  placeholder="Related files (one per line)"
+                  style={{ minHeight: 70 }}
+                />
+                <button onClick={() => { void createDecisionLog(); }}>Create Decision Log</button>
+              </div>
+              {decisionLogs.map((entry) => (
+                <div key={entry.decision_id} className="checkpoint-card">
+                  <strong>{entry.title}</strong>
+                  <span>{entry.context}</span>
+                  <code>chosen: {entry.chosen}</code>
+                  <code>files: {entry.related_files.join(", ") || "none"}</code>
+                </div>
+              ))}
+              {decisionLogs.length === 0 ? <p className="empty">No decision logs yet.</p> : null}
+
+              <h4>Reviewer Mode</h4>
+              <div className="checkpoint-card">
+                <textarea
+                  value={reviewerFiles}
+                  onChange={(event) => setReviewerFiles(event.target.value)}
+                  placeholder="Optional files to review (one per line)"
+                  style={{ minHeight: 80 }}
+                />
+                <button onClick={() => { void runReviewer(); }}>Run Reviewer</button>
+              </div>
+              {reviewerFindings.map((finding) => (
+                <div key={finding.id} className="checkpoint-card">
+                  <strong>{finding.title}</strong>
+                  <code>{finding.file}:{finding.line}</code>
+                  <span>{finding.body}</span>
+                  <code>{finding.severity} / {finding.confidence.toFixed(2)}</code>
+                </div>
+              ))}
+              {reviewerFindings.length === 0 ? <p className="empty">No reviewer findings yet.</p> : null}
             </div>
           ) : null}
           {panelTab === "diff" ? (
