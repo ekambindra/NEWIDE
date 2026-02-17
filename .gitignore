@@ -1,0 +1,9 @@
+node_modules
+dist
+coverage
+.tmp
+checkpoints
+*.log
+.DS_Store
+.vscode
+.env

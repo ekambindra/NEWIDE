@@ -1,0 +1,101 @@
+import { contextBridge, ipcRenderer } from "electron";
+
+type TreeNode = {
+  name: string;
+  path: string;
+  type: "file" | "directory";
+  children?: TreeNode[];
+  gitStatus?: string;
+};
+
+type SearchHit = {
+  file: string;
+  line: number;
+  text: string;
+};
+
+type TerminalResult = {
+  id: string;
+  command: string;
+  exitCode: number | null;
+  stdout: string;
+  stderr: string;
+  policy: {
+    decision: "allow" | "deny" | "require_approval";
+    reason: string;
+  };
+  artifactPath: string | null;
+};
+
+type AuditEvent = {
+  event_id: string;
+  ts: string;
+  actor: string;
+  action: string;
+  target: string;
+  decision: "allow" | "deny" | "require_approval" | "executed" | "error";
+  reason: string;
+  metadata: Record<string, unknown>;
+  previous_checksum: string;
+  checksum: string;
+};
+
+type MultiAgentSummary = {
+  coordinatorRunId: string;
+  overallStatus: "success" | "failed";
+  agentRuns: Array<{
+    runId: string;
+    status: "success" | "failed" | "blocked";
+    steps: number;
+    agentId: string;
+    focus: string;
+  }>;
+};
+
+const api = {
+  openWorkspace: (): Promise<string | null> => ipcRenderer.invoke("workspace:open"),
+  getTree: (root: string): Promise<TreeNode[]> => ipcRenderer.invoke("workspace:tree", root),
+  startWatch: (root: string): Promise<boolean> => ipcRenderer.invoke("workspace:watch:start", root),
+  stopWatch: (root: string): Promise<boolean> => ipcRenderer.invoke("workspace:watch:stop", root),
+  readFile: (root: string, relPath: string) => ipcRenderer.invoke("file:read", root, relPath),
+  writeFile: (root: string, relPath: string, content: string) =>
+    ipcRenderer.invoke("file:write", root, relPath, content),
+  createPath: (root: string, relPath: string, isDirectory: boolean) =>
+    ipcRenderer.invoke("file:create", root, relPath, isDirectory),
+  renamePath: (root: string, fromPath: string, toPath: string) =>
+    ipcRenderer.invoke("file:rename", root, fromPath, toPath),
+  deletePath: (root: string, relPath: string) => ipcRenderer.invoke("file:delete", root, relPath),
+  searchProject: (root: string, query: string): Promise<SearchHit[]> =>
+    ipcRenderer.invoke("search:project", root, query),
+  gitStatus: (root: string): Promise<Array<{ file: string; status: string }>> =>
+    ipcRenderer.invoke("git:status", root),
+  runCommand: (root: string, command: string): Promise<TerminalResult> =>
+    ipcRenderer.invoke("terminal:run", root, command),
+  runApprovedCommand: (root: string, command: string): Promise<TerminalResult> =>
+    ipcRenderer.invoke("terminal:run-approved", root, command),
+  replayTerminal: (limit: number): Promise<Array<{ runId: string; command: string; status: string; output: string }>> =>
+    ipcRenderer.invoke("terminal:replay", limit),
+  runMultiAgentTask: (
+    payload: { goal: string; acceptanceCriteria: string[]; agentCount: number }
+  ): Promise<MultiAgentSummary> => ipcRenderer.invoke("agent:run-multi", payload),
+  listCheckpoints: (): Promise<Array<{ runId: string; path: string }>> => ipcRenderer.invoke("checkpoints:list"),
+  getCheckpointDetail: (
+    runId: string
+  ): Promise<{
+    runId: string;
+    path: string;
+    manifest: Record<string, unknown> | null;
+    steps: Array<{ stepId: string; files: string[]; preview: Record<string, string> }>;
+  }> => ipcRenderer.invoke("checkpoints:detail", runId),
+  getRecentAudit: (limit: number): Promise<AuditEvent[]> => ipcRenderer.invoke("audit:recent", limit),
+  exportAudit: (): Promise<{ path: string; count: number }> => ipcRenderer.invoke("audit:export"),
+  onWorkspaceChanged: (listener: (payload: { root: string; path: string; ts: number }) => void): (() => void) => {
+    const wrapped = (_event: unknown, payload: { root: string; path: string; ts: number }) => listener(payload);
+    ipcRenderer.on("workspace:changed", wrapped);
+    return () => ipcRenderer.off("workspace:changed", wrapped);
+  }
+};
+
+contextBridge.exposeInMainWorld("ide", api);
+
+export type PreloadApi = typeof api;
