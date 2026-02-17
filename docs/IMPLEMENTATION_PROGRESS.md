@@ -2,8 +2,8 @@
 
 ## Current Completion
 
-- Completed features: 92/170
-- Completion percentage: 54.1%
+- Completed features: 95/170
+- Completion percentage: 55.9%
 
 ## Latest Implemented Increments
 
@@ -14,6 +14,7 @@
 5. Checkpoint detail inspector.
 6. Diff chunk decision queue with rationale capture.
 7. Unsaved-change guard and auto-save modes.
+8. Team prompt library documentation linked in repo docs.
 
 ## Verification Commands
 

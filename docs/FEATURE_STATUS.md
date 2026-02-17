@@ -2,16 +2,16 @@
 
 This tracker reflects the current implementation state of the 170-item inventory.
 
-## Completed (92)
+## Completed (95)
 
 - UI-001..UI-013, UI-017..UI-020
 - WS-001..WS-010, WS-012..WS-014
 - DIFF-001..DIFF-004, DIFF-008, DIFF-010
 - TERM-002..TERM-005, TERM-008..TERM-010
-- AGENT-001..AGENT-017
+- AGENT-001..AGENT-018
 - IDX-001, IDX-003, IDX-004, IDX-006, IDX-008, IDX-010, IDX-013
 - AUTO-001, AUTO-003, AUTO-008..AUTO-014
-- TEAM-009
+- TEAM-009, TEAM-010
 - ENT-004..ENT-007, ENT-010, ENT-011, ENT-016
 - CLOUD-001..CLOUD-005
 - EVAL-001, EVAL-009
@@ -35,5 +35,5 @@ This tracker reflects the current implementation state of the 170-item inventory
 
 ## Progress
 
-- Completed: `92/170`
-- Percent: `54.1%`
+- Completed: `95/170`
+- Percent: `55.9%`

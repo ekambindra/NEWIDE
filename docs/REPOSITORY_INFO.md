@@ -4,7 +4,9 @@ This file is updated when repository setup is completed.
 
 - Local root: `/Users/ekambindra/NEWIDE`
 - GitHub owner: `ekambindra`
-- Remote repository: pending creation/push in current implementation pass
+- Remote repository: `https://github.com/ekambindra/NEWIDE`
+- Default branch: `main`
+- Remote: `origin` -> `https://github.com/ekambindra/NEWIDE.git`
 
 ## Linked Documentation
 
