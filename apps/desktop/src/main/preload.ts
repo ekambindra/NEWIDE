@@ -116,6 +116,61 @@ type DiffCheckpointRecord = {
   signatureValid?: boolean;
 };
 
+type WorkspaceIndexReport = {
+  root: string;
+  generatedAt: string;
+  diagnostics: {
+    parserPipeline: "tree_sitter" | "fallback";
+    treeSitterAvailable: boolean;
+    treeSitterReason: string | null;
+    indexedFiles: number;
+    totalSymbols: number;
+    parseErrors: number;
+    freshnessLatencyMs: number | null;
+    batchLatencyMs: number | null;
+    files: Array<{
+      file: string;
+      absolutePath: string;
+      parserMode: "tree_sitter" | "typescript_ast" | "regex_fallback";
+      symbols: number;
+      latencyMs: number;
+      indexedAt: string;
+      fromCache: boolean;
+      error: string | null;
+    }>;
+  };
+  repoMap: Array<{
+    file: string;
+    symbols: number;
+    imports: string[];
+  }>;
+  topFiles: Array<{
+    file: string;
+    symbols: number;
+    latencyMs: number;
+    parserMode: string;
+    error: string | null;
+  }>;
+};
+
+type ArtifactCompletenessReport = {
+  root: string;
+  generatedAt: string;
+  required: string[];
+  present: string[];
+  missing: string[];
+  completenessPercent: number;
+};
+
+type GreenPipelineReport = {
+  generatedAt: string;
+  totalRuns: number;
+  passedRuns: number;
+  passRatePercent: number;
+  targetPercent: number;
+  meetsTarget: boolean;
+};
+
 type AuditEvent = {
   event_id: string;
   ts: string;
@@ -271,6 +326,18 @@ const api = {
       signature: string;
     } | null;
   }> => ipcRenderer.invoke("diff:verify-checkpoint-signature", checkpointId),
+  runWorkspaceIndex: (payload: {
+    root: string;
+    limit?: number;
+  }): Promise<WorkspaceIndexReport> => ipcRenderer.invoke("indexer:run", payload),
+  getWorkspaceIndexDiagnostics: (root: string): Promise<WorkspaceIndexReport> =>
+    ipcRenderer.invoke("indexer:diagnostics", root),
+  checkArtifactCompleteness: (root: string): Promise<ArtifactCompletenessReport> =>
+    ipcRenderer.invoke("auto:artifact-completeness", root),
+  checkGreenPipeline: (payload?: {
+    limit?: number;
+    targetPercent?: number;
+  }): Promise<GreenPipelineReport> => ipcRenderer.invoke("auto:green-pipeline", payload),
   runMultiAgentTask: (
     payload: { goal: string; acceptanceCriteria: string[]; agentCount: number }
   ): Promise<MultiAgentSummary> => ipcRenderer.invoke("agent:run-multi", payload),

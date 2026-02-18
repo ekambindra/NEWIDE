@@ -16,6 +16,10 @@ describe("indexer", () => {
 
     expect(first.length).toBeGreaterThan(0);
     expect(second.length).toBe(first.length);
+    const diagnostics = indexer.diagnostics();
+    expect(diagnostics.indexedFiles).toBe(1);
+    expect(diagnostics.totalSymbols).toBeGreaterThan(0);
+    expect(diagnostics.files[0]?.parserMode).toMatch(/tree_sitter|typescript_ast|regex_fallback/);
 
     const context = buildContext(first, 1000);
     expect(context.files.length).toBe(1);

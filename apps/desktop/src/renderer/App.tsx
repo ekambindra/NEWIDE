@@ -215,6 +215,61 @@ type DiffCheckpointRecord = {
   signatureValid?: boolean;
 };
 
+type WorkspaceIndexReport = {
+  root: string;
+  generatedAt: string;
+  diagnostics: {
+    parserPipeline: "tree_sitter" | "fallback";
+    treeSitterAvailable: boolean;
+    treeSitterReason: string | null;
+    indexedFiles: number;
+    totalSymbols: number;
+    parseErrors: number;
+    freshnessLatencyMs: number | null;
+    batchLatencyMs: number | null;
+    files: Array<{
+      file: string;
+      absolutePath: string;
+      parserMode: "tree_sitter" | "typescript_ast" | "regex_fallback";
+      symbols: number;
+      latencyMs: number;
+      indexedAt: string;
+      fromCache: boolean;
+      error: string | null;
+    }>;
+  };
+  repoMap: Array<{
+    file: string;
+    symbols: number;
+    imports: string[];
+  }>;
+  topFiles: Array<{
+    file: string;
+    symbols: number;
+    latencyMs: number;
+    parserMode: string;
+    error: string | null;
+  }>;
+};
+
+type ArtifactCompletenessReport = {
+  root: string;
+  generatedAt: string;
+  required: string[];
+  present: string[];
+  missing: string[];
+  completenessPercent: number;
+};
+
+type GreenPipelineReport = {
+  generatedAt: string;
+  totalRuns: number;
+  passedRuns: number;
+  passRatePercent: number;
+  targetPercent: number;
+  meetsTarget: boolean;
+};
+
 const panelTabs: PanelTab[] = ["agent", "plan", "diff", "checkpoints"];
 const bottomTabs: BottomTab[] = ["terminal", "tests", "logs"];
 const leftTabs: LeftTab[] = ["files", "search"];
@@ -487,6 +542,10 @@ export function App() {
   const [patchQueue, setPatchQueue] = useState<DiffQueueItem[]>([]);
   const [diffCheckpoints, setDiffCheckpoints] = useState<DiffCheckpointRecord[]>([]);
   const [allowFullRewriteApply, setAllowFullRewriteApply] = useState(false);
+  const [indexReport, setIndexReport] = useState<WorkspaceIndexReport | null>(null);
+  const [indexLimit, setIndexLimit] = useState("1200");
+  const [artifactReport, setArtifactReport] = useState<ArtifactCompletenessReport | null>(null);
+  const [greenPipelineReport, setGreenPipelineReport] = useState<GreenPipelineReport | null>(null);
   const [autoSaveMode, setAutoSaveMode] = useState<"manual" | "afterDelay" | "onBlur">("manual");
   const dragRef = useRef<null | "left" | "right" | "bottom">(null);
 
@@ -536,6 +595,14 @@ export function App() {
     setDiffCheckpoints(items);
   };
 
+  const refreshIndexDiagnostics = async () => {
+    if (!workspaceRoot) {
+      return;
+    }
+    const report = await window.ide.getWorkspaceIndexDiagnostics(workspaceRoot);
+    setIndexReport(report as WorkspaceIndexReport);
+  };
+
   const refreshTeamData = async () => {
     const [memory, decisions] = await Promise.all([
       window.ide.listTeamMemory(),
@@ -582,6 +649,7 @@ export function App() {
     void refreshAudit();
     void refreshCheckpoints();
     void refreshDiffCheckpoints();
+    void refreshIndexDiagnostics();
     void refreshTeamData();
     void window.ide.startWatch(workspaceRoot);
     const unsubscribe = window.ide.onWorkspaceChanged(async () => {
@@ -598,6 +666,7 @@ export function App() {
   useEffect(() => {
     void refreshCheckpoints();
     void refreshDiffCheckpoints();
+    void refreshIndexDiagnostics();
     void refreshAudit();
     void refreshTeamData();
   }, []);
@@ -879,6 +948,49 @@ export function App() {
     if (result.artifactPath) {
       await refreshCheckpoints();
     }
+    await refreshAudit();
+  };
+
+  const runWorkspaceIndexScan = async () => {
+    if (!workspaceRoot) {
+      return;
+    }
+    const limit = Math.max(50, Math.min(5000, Number(indexLimit) || 1200));
+    const report = await window.ide.runWorkspaceIndex({
+      root: workspaceRoot,
+      limit
+    });
+    setIndexReport(report as WorkspaceIndexReport);
+    setLogs((prev) => [
+      `[indexer] files=${report.diagnostics.indexedFiles} symbols=${report.diagnostics.totalSymbols} errors=${report.diagnostics.parseErrors}`,
+      ...prev
+    ]);
+    await refreshAudit();
+  };
+
+  const runArtifactCompletenessCheck = async () => {
+    if (!workspaceRoot) {
+      return;
+    }
+    const report = await window.ide.checkArtifactCompleteness(workspaceRoot);
+    setArtifactReport(report as ArtifactCompletenessReport);
+    setLogs((prev) => [
+      `[artifact-check] completeness=${report.completenessPercent}% missing=${report.missing.length}`,
+      ...prev
+    ]);
+    await refreshAudit();
+  };
+
+  const runGreenPipelineCheck = async () => {
+    const report = await window.ide.checkGreenPipeline({
+      limit: 40,
+      targetPercent: 90
+    });
+    setGreenPipelineReport(report as GreenPipelineReport);
+    setLogs((prev) => [
+      `[green-pipeline] rate=${report.passRatePercent}% (${report.passedRuns}/${report.totalRuns})`,
+      ...prev
+    ]);
     await refreshAudit();
   };
 
@@ -1547,6 +1659,56 @@ export function App() {
                 </div>
               ))}
               {auditEvents.length === 0 ? <p className="empty">No audit events yet.</p> : null}
+
+              <h4>Index Diagnostics</h4>
+              <div className="checkpoint-card">
+                <div className="inline-search">
+                  <input
+                    value={indexLimit}
+                    onChange={(event) => setIndexLimit(event.target.value)}
+                    placeholder="Index file limit"
+                  />
+                  <button onClick={() => { void runWorkspaceIndexScan(); }}>Run Index Scan</button>
+                  <button onClick={() => { void refreshIndexDiagnostics(); }}>Refresh Diagnostics</button>
+                </div>
+                {indexReport ? (
+                  <>
+                    <code>generated: {indexReport.generatedAt}</code>
+                    <code>pipeline: {indexReport.diagnostics.parserPipeline} | tree-sitter: {indexReport.diagnostics.treeSitterAvailable ? "available" : "fallback"}</code>
+                    <code>files: {indexReport.diagnostics.indexedFiles} | symbols: {indexReport.diagnostics.totalSymbols} | errors: {indexReport.diagnostics.parseErrors}</code>
+                    <code>freshness(ms): {indexReport.diagnostics.freshnessLatencyMs ?? 0} | batch(ms): {indexReport.diagnostics.batchLatencyMs ?? 0}</code>
+                    {indexReport.diagnostics.treeSitterReason ? <span>{indexReport.diagnostics.treeSitterReason}</span> : null}
+                    {indexReport.topFiles.slice(0, 8).map((item) => (
+                      <code key={`idx-${item.file}`}>
+                        {item.file} | symbols={item.symbols} | parser={item.parserMode} | latency={item.latencyMs}ms
+                      </code>
+                    ))}
+                  </>
+                ) : (
+                  <p className="empty">No index diagnostics yet.</p>
+                )}
+              </div>
+
+              <h4>Autonomy Checks</h4>
+              <div className="checkpoint-card">
+                <div className="inline-search">
+                  <button onClick={() => { void runArtifactCompletenessCheck(); }}>Artifact Completeness</button>
+                  <button onClick={() => { void runGreenPipelineCheck(); }}>Green Pipeline Rate</button>
+                </div>
+                {artifactReport ? (
+                  <>
+                    <code>artifact completeness: {artifactReport.completenessPercent}%</code>
+                    <code>present: {artifactReport.present.join(", ") || "none"}</code>
+                    <code>missing: {artifactReport.missing.join(", ") || "none"}</code>
+                  </>
+                ) : null}
+                {greenPipelineReport ? (
+                  <code>
+                    green pipeline: {greenPipelineReport.passRatePercent}% ({greenPipelineReport.passedRuns}/{greenPipelineReport.totalRuns}) target={greenPipelineReport.targetPercent}% status={greenPipelineReport.meetsTarget ? "pass" : "fail"}
+                  </code>
+                ) : null}
+                {!artifactReport && !greenPipelineReport ? <p className="empty">No autonomy checks run yet.</p> : null}
+              </div>
 
               <h4>Project Memory</h4>
               <div className="checkpoint-card">

@@ -12,6 +12,11 @@ import { dirname, join, relative, resolve } from "node:path";
 import { app, BrowserWindow, dialog, ipcMain } from "electron";
 import ignore from "ignore";
 import { AgentRuntime } from "@ide/agent-runtime";
+import {
+  SymbolIndexer,
+  type IndexerDiagnostics,
+  type RepoMapEntry
+} from "@ide/indexer";
 import ts from "typescript";
 import {
   detectCommandRisk,
@@ -225,8 +230,42 @@ type ReleaseNotesDraft = {
   markdown: string;
 };
 
+type WorkspaceIndexReport = {
+  root: string;
+  generatedAt: string;
+  diagnostics: IndexerDiagnostics;
+  repoMap: RepoMapEntry[];
+  topFiles: Array<{
+    file: string;
+    symbols: number;
+    latencyMs: number;
+    parserMode: string;
+    error: string | null;
+  }>;
+};
+
+type ArtifactCompletenessReport = {
+  root: string;
+  generatedAt: string;
+  required: string[];
+  present: string[];
+  missing: string[];
+  completenessPercent: number;
+};
+
+type GreenPipelineReport = {
+  generatedAt: string;
+  totalRuns: number;
+  passedRuns: number;
+  passRatePercent: number;
+  targetPercent: number;
+  meetsTarget: boolean;
+};
+
 const watchers = new Map<string, { watcher: FSWatcher; timer: NodeJS.Timeout | null }>();
 const terminalSessions = new Map<string, TerminalSession>();
+const workspaceIndexer = new SymbolIndexer();
+const workspaceIndexReports = new Map<string, WorkspaceIndexReport>();
 const MAX_FILE_BYTES = 1024 * 1024 * 2;
 
 function nowIso(): string {
@@ -1109,6 +1148,173 @@ async function searchProject(root: string, query: string): Promise<Array<{ file:
       };
     })
     .filter((item): item is { file: string; line: number; text: string } => item !== null);
+}
+
+function isIndexableFile(path: string): boolean {
+  return /\.(ts|tsx|js|jsx|mts|cts|mjs|cjs)$/i.test(path);
+}
+
+async function discoverIndexableFiles(root: string, limit: number): Promise<string[]> {
+  try {
+    const { stdout } = await execFileAsync("rg", ["--files"], { cwd: root });
+    return stdout
+      .split("\n")
+      .filter(Boolean)
+      .map((file) => normalizeRepoPath(file))
+      .filter((file) => isIndexableFile(file))
+      .slice(0, Math.max(1, Math.min(limit, 5000)));
+  } catch {
+    const fallback: string[] = [];
+    const walk = async (current: string): Promise<void> => {
+      const entries = await fs.readdir(current, { withFileTypes: true });
+      for (const entry of entries) {
+        const absolute = join(current, entry.name);
+        const rel = normalizeRepoPath(relative(root, absolute));
+        if (!rel || rel.startsWith(".git/") || rel.startsWith("node_modules/") || rel.startsWith("dist/")) {
+          continue;
+        }
+        if (entry.isDirectory()) {
+          await walk(absolute);
+          continue;
+        }
+        if (isIndexableFile(rel)) {
+          fallback.push(rel);
+          if (fallback.length >= limit) {
+            return;
+          }
+        }
+      }
+    };
+    await walk(root);
+    return fallback;
+  }
+}
+
+async function runWorkspaceIndex(root: string, limit = 1200): Promise<WorkspaceIndexReport> {
+  const files = await discoverIndexableFiles(root, limit);
+  const absoluteFiles = files.map((file) => resolve(root, file));
+  await workspaceIndexer.indexFiles(root, absoluteFiles);
+
+  const diagnostics = workspaceIndexer.diagnostics();
+  const fileMap = new Map(diagnostics.files.map((diag) => [normalizeRepoPath(diag.file), diag]));
+  const repoMap = workspaceIndexer
+    .repoMap()
+    .filter((entry) => files.includes(normalizeRepoPath(entry.file)))
+    .sort((a, b) => b.symbols - a.symbols);
+
+  const topFiles = repoMap.slice(0, 20).map((entry) => {
+    const diag = fileMap.get(normalizeRepoPath(entry.file));
+    return {
+      file: entry.file,
+      symbols: entry.symbols,
+      latencyMs: diag?.latencyMs ?? 0,
+      parserMode: diag?.parserMode ?? "unknown",
+      error: diag?.error ?? null
+    };
+  });
+
+  const report: WorkspaceIndexReport = {
+    root,
+    generatedAt: nowIso(),
+    diagnostics,
+    repoMap,
+    topFiles
+  };
+  workspaceIndexReports.set(root, report);
+  return report;
+}
+
+function getWorkspaceIndexReport(root: string): WorkspaceIndexReport | null {
+  return workspaceIndexReports.get(root) ?? null;
+}
+
+async function checkArtifactCompleteness(root: string): Promise<ArtifactCompletenessReport> {
+  const required = [
+    "README.md",
+    "ARCHITECTURE.md",
+    "RUNBOOK.md",
+    "SECURITY.md",
+    "docker-compose.yml",
+    ".env.example",
+    ".github/workflows"
+  ];
+
+  const present: string[] = [];
+  const missing: string[] = [];
+  for (const item of required) {
+    const target = join(root, item);
+    if (item === ".github/workflows") {
+      if (existsSync(target)) {
+        try {
+          const entries = await fs.readdir(target);
+          if (entries.some((entry) => /\.ya?ml$/i.test(entry))) {
+            present.push(item);
+          } else {
+            missing.push(item);
+          }
+        } catch {
+          missing.push(item);
+        }
+      } else {
+        missing.push(item);
+      }
+      continue;
+    }
+    if (existsSync(target)) {
+      present.push(item);
+    } else {
+      missing.push(item);
+    }
+  }
+
+  const completenessPercent =
+    required.length === 0 ? 100 : Math.round((present.length / required.length) * 1000) / 10;
+
+  return {
+    root,
+    generatedAt: nowIso(),
+    required,
+    present,
+    missing,
+    completenessPercent
+  };
+}
+
+async function checkGreenPipelineGuarantee(limit = 40, targetPercent = 90): Promise<GreenPipelineReport> {
+  const checkpoints = await listCheckpoints();
+  const runs = checkpoints
+    .filter((entry) => entry.runId.startsWith("pipeline-"))
+    .slice(0, Math.max(1, Math.min(300, limit)));
+
+  let passedRuns = 0;
+  for (const run of runs) {
+    const manifestPath = join(run.path, "manifest.json");
+    if (!existsSync(manifestPath)) {
+      continue;
+    }
+    try {
+      const manifest = JSON.parse(await fs.readFile(manifestPath, "utf8")) as {
+        final_status?: string;
+      };
+      if (manifest.final_status === "success") {
+        passedRuns += 1;
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  const totalRuns = runs.length;
+  const passRatePercent =
+    totalRuns === 0 ? 0 : Math.round((passedRuns / totalRuns) * 1000) / 10;
+  return {
+    generatedAt: nowIso(),
+    totalRuns,
+    passedRuns,
+    passRatePercent,
+    targetPercent,
+    meetsTarget: passRatePercent >= targetPercent
+  };
 }
 
 async function getGitStatuses(root: string): Promise<Map<string, string>> {
@@ -2268,6 +2474,74 @@ app.whenReady().then(async () => {
     const map = await getGitStatuses(root);
     return [...map.entries()].map(([file, status]) => ({ file, status }));
   });
+
+  ipcMain.handle(
+    "indexer:run",
+    async (_event, payload: { root: string; limit?: number }): Promise<WorkspaceIndexReport> => {
+      const report = await runWorkspaceIndex(payload.root, payload.limit ?? 1200);
+      await appendAuditEvent({
+        action: "indexer.run",
+        target: payload.root,
+        decision: "executed",
+        reason: "workspace index refreshed",
+        metadata: {
+          indexed_files: report.diagnostics.indexedFiles,
+          total_symbols: report.diagnostics.totalSymbols,
+          parse_errors: report.diagnostics.parseErrors
+        }
+      });
+      return report;
+    }
+  );
+
+  ipcMain.handle("indexer:diagnostics", async (_event, root: string) => {
+    const existing = getWorkspaceIndexReport(root);
+    if (existing) {
+      return existing;
+    }
+    return runWorkspaceIndex(root, 1200);
+  });
+
+  ipcMain.handle(
+    "auto:artifact-completeness",
+    async (_event, root: string): Promise<ArtifactCompletenessReport> => {
+      const report = await checkArtifactCompleteness(root);
+      await appendAuditEvent({
+        action: "auto.artifact_completeness",
+        target: root,
+        decision: "executed",
+        reason: "artifact completeness computed",
+        metadata: {
+          present: report.present.length,
+          missing: report.missing.length,
+          completeness: report.completenessPercent
+        }
+      });
+      return report;
+    }
+  );
+
+  ipcMain.handle(
+    "auto:green-pipeline",
+    async (_event, payload?: { limit?: number; targetPercent?: number }): Promise<GreenPipelineReport> => {
+      const report = await checkGreenPipelineGuarantee(
+        payload?.limit ?? 40,
+        payload?.targetPercent ?? 90
+      );
+      await appendAuditEvent({
+        action: "auto.green_pipeline",
+        target: "pipeline-runs",
+        decision: "executed",
+        reason: "green pipeline guarantee computed",
+        metadata: {
+          total_runs: report.totalRuns,
+          passed_runs: report.passedRuns,
+          pass_rate: report.passRatePercent
+        }
+      });
+      return report;
+    }
+  );
 
   ipcMain.handle(
     "terminal:session:start",

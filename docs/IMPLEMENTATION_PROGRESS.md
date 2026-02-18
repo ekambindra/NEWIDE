@@ -2,8 +2,8 @@
 
 ## Current Completion
 
-- Completed features: 114/170
-- Completion percentage: 67.1%
+- Completed features: 118/170
+- Completion percentage: 69.4%
 
 ## Latest Implemented Increments
 
@@ -38,6 +38,10 @@
 29. Patch revert-by-checkpoint workflow for file restoration after approved diff apply (DIFF-006).
 30. Full-file rewrite blocking in diff apply flow with explicit override requirement (DIFF-007).
 31. Signed patch manifests with local key-based signature verification for replay integrity (DIFF-012).
+32. Tree-sitter parser pipeline integration with resilient fallback modes and per-file parser diagnostics (IDX-002).
+33. Index diagnostics panel and workspace scan workflow with freshness/latency/error visibility (IDX-015).
+34. Artifact completeness checker for required production artifacts (`README`, `ARCHITECTURE`, `RUNBOOK`, `SECURITY`, `.env.example`, `docker-compose`, workflows) (AUTO-015).
+35. Green pipeline guarantee checker with pass-rate KPI computation and target evaluation (AUTO-016).
 
 ## Verification Commands
 
