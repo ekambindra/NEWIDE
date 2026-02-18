@@ -52,6 +52,40 @@ export type RetrievalContextReport = {
   candidates: RetrievalCandidate[];
 };
 
+export type CallGraphEdge = {
+  file: string;
+  from: string;
+  to: string;
+  line: number;
+};
+
+export type CallGraphReport = {
+  nodes: string[];
+  edges: CallGraphEdge[];
+  topCallers: Array<{ symbol: string; count: number }>;
+  topCallees: Array<{ symbol: string; count: number }>;
+};
+
+export type RenameImpactEntry = {
+  file: string;
+  totalMatches: number;
+  declarationMatches: number;
+  referenceMatches: number;
+  collisionMatches: number;
+  lines: number[];
+};
+
+export type RenameImpactReport = {
+  from: string;
+  to: string;
+  filesTouched: number;
+  totalMatches: number;
+  declarationMatches: number;
+  referenceMatches: number;
+  collisionMatches: number;
+  impacts: RenameImpactEntry[];
+};
+
 export type ParserMode = "tree_sitter" | "typescript_ast" | "regex_fallback";
 
 export type FileIndexDiagnostics = {
@@ -151,6 +185,7 @@ export class LexicalSearch {
 export class SymbolIndexer {
   private readonly fileHashes = new Map<string, string>();
   private readonly symbolsByFile = new Map<string, IndexSymbol[]>();
+  private readonly sourceByFile = new Map<string, string>();
   private readonly fileDiagnosticsByPath = new Map<string, FileIndexDiagnostics>();
   private lastBatchLatencyMs: number | null = null;
   private lastFreshnessLatencyMs: number | null = null;
@@ -181,6 +216,7 @@ export class SymbolIndexer {
 
     this.fileHashes.set(filePath, hash);
     this.symbolsByFile.set(filePath, parsed.symbols);
+    this.sourceByFile.set(filePath, source);
     this.fileDiagnosticsByPath.set(filePath, {
       file: relFile,
       absolutePath: filePath,
@@ -240,6 +276,7 @@ export class SymbolIndexer {
   invalidate(filePath: string): void {
     this.fileHashes.delete(filePath);
     this.symbolsByFile.delete(filePath);
+    this.sourceByFile.delete(filePath);
     this.fileDiagnosticsByPath.delete(filePath);
   }
 
@@ -334,6 +371,146 @@ export class SymbolIndexer {
       tokenBudget,
       selected: buildContext(rankedSymbols, tokenBudget),
       candidates: ranked
+    };
+  }
+
+  callGraph(limitEdges = 500): CallGraphReport {
+    const edges: CallGraphEdge[] = [];
+    const nodes = new Set<string>();
+
+    for (const [filePath, source] of this.sourceByFile.entries()) {
+      const relFile = this.symbolsByFile.get(filePath)?.[0]?.file ?? normalizeRepoPath(filePath);
+      const ext = extname(relFile).toLowerCase();
+      if (!isCodeExt(ext)) {
+        continue;
+      }
+
+      try {
+        const sourceFile = ts.createSourceFile(
+          relFile,
+          source,
+          ts.ScriptTarget.Latest,
+          true,
+          scriptKindForExt(ext)
+        );
+        const moduleNode = `<module:${relFile}>`;
+        const fnStack: string[] = [moduleNode];
+        nodes.add(moduleNode);
+
+        const walk = (node: ts.Node): void => {
+          if (isNamedFunctionLike(node)) {
+            fnStack.push(functionLikeName(node));
+            nodes.add(fnStack[fnStack.length - 1] ?? "<anonymous>");
+          }
+
+          if (ts.isCallExpression(node)) {
+            const from = fnStack[fnStack.length - 1] ?? "<anonymous>";
+            const to = callTargetName(node.expression);
+            const line = sourceFile.getLineAndCharacterOfPosition(
+              node.expression.getStart(sourceFile)
+            ).line + 1;
+            nodes.add(from);
+            nodes.add(to);
+            edges.push({
+              file: relFile,
+              from,
+              to,
+              line
+            });
+          }
+
+          ts.forEachChild(node, walk);
+          if (isNamedFunctionLike(node)) {
+            fnStack.pop();
+          }
+        };
+        walk(sourceFile);
+      } catch {
+        continue;
+      }
+    }
+
+    const limited = edges.slice(0, Math.max(1, limitEdges));
+    return {
+      nodes: [...nodes].sort(),
+      edges: limited,
+      topCallers: topFrequency(limited.map((edge) => edge.from), 12),
+      topCallees: topFrequency(limited.map((edge) => edge.to), 12)
+    };
+  }
+
+  analyzeRenameImpact(from: string, to: string, limit = 100): RenameImpactReport {
+    const target = from.trim();
+    const replacement = to.trim();
+    if (!target) {
+      return {
+        from: target,
+        to: replacement,
+        filesTouched: 0,
+        totalMatches: 0,
+        declarationMatches: 0,
+        referenceMatches: 0,
+        collisionMatches: 0,
+        impacts: []
+      };
+    }
+
+    const escapedTarget = escapeRegExp(target);
+    const escapedReplacement = escapeRegExp(replacement);
+    const matchPattern = new RegExp(`\\b${escapedTarget}\\b`, "g");
+    const collisionPattern = replacement ? new RegExp(`\\b${escapedReplacement}\\b`, "g") : null;
+    const impacts: RenameImpactEntry[] = [];
+
+    for (const [filePath, source] of this.sourceByFile.entries()) {
+      const relFile = this.symbolsByFile.get(filePath)?.[0]?.file ?? normalizeRepoPath(filePath);
+      const lines = normalizeLf(source).split("\n");
+      const hitLines: number[] = [];
+      let totalMatches = 0;
+
+      for (let idx = 0; idx < lines.length; idx += 1) {
+        const line = lines[idx] ?? "";
+        const matches = line.match(matchPattern);
+        if (matches && matches.length > 0) {
+          totalMatches += matches.length;
+          hitLines.push(idx + 1);
+        }
+      }
+
+      if (totalMatches === 0) {
+        continue;
+      }
+
+      const declarationMatches = (this.symbolsByFile.get(filePath) ?? []).filter(
+        (symbol) => symbol.name === target
+      ).length;
+      const referenceMatches = Math.max(0, totalMatches - declarationMatches);
+      const collisionMatches = collisionPattern
+        ? (normalizeLf(source).match(collisionPattern)?.length ?? 0)
+        : 0;
+
+      impacts.push({
+        file: relFile,
+        totalMatches,
+        declarationMatches,
+        referenceMatches,
+        collisionMatches,
+        lines: hitLines.slice(0, 16)
+      });
+    }
+
+    const sorted = impacts
+      .sort((a, b) => b.totalMatches - a.totalMatches)
+      .slice(0, Math.max(1, limit));
+
+    return {
+      from: target,
+      to: replacement,
+      filesTouched: sorted.length,
+      totalMatches: sorted.reduce((sum, item) => sum + item.totalMatches, 0),
+      declarationMatches: sorted.reduce((sum, item) => sum + item.declarationMatches, 0),
+      referenceMatches: sorted.reduce((sum, item) => sum + item.referenceMatches, 0),
+      collisionMatches: sorted.reduce((sum, item) => sum + item.collisionMatches, 0),
+      impacts: sorted
     };
   }
 
@@ -669,6 +846,79 @@ function tokenizeQuery(query: string): string[] {
     .map((term) => term.trim())
     .filter((term) => term.length >= 2)
     .slice(0, 12);
+}
+
+function isCodeExt(ext: string): boolean {
+  return [".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"].includes(ext);
+}
+
+function scriptKindForExt(ext: string): ts.ScriptKind {
+  return ext === ".tsx" ? ts.ScriptKind.TSX
+  : ext === ".ts" || ext === ".mts" || ext === ".cts" ? ts.ScriptKind.TS
+  : ext === ".jsx" ? ts.ScriptKind.JSX
+  : ts.ScriptKind.JS;
+}
+
+function isNamedFunctionLike(node: ts.Node): node is
+  ts.FunctionDeclaration |
+  ts.MethodDeclaration |
+  ts.FunctionExpression |
+  ts.ArrowFunction {
+  if (ts.isFunctionDeclaration(node) || ts.isMethodDeclaration(node)) {
+    return true;
+  }
+  if (ts.isFunctionExpression(node) || ts.isArrowFunction(node)) {
+    return node.parent !== undefined;
+  }
+  return false;
+}
+
+function functionLikeName(
+  node: ts.FunctionDeclaration | ts.MethodDeclaration | ts.FunctionExpression | ts.ArrowFunction
+): string {
+  if (ts.isFunctionDeclaration(node) && node.name?.text) {
+    return node.name.text;
+  }
+  if (ts.isMethodDeclaration(node) && ts.isIdentifier(node.name)) {
+    return node.name.text;
+  }
+  if ((ts.isFunctionExpression(node) || ts.isArrowFunction(node)) && node.parent) {
+    if (ts.isVariableDeclaration(node.parent) && ts.isIdentifier(node.parent.name)) {
+      return node.parent.name.text;
+    }
+    if (ts.isPropertyAssignment(node.parent) && ts.isIdentifier(node.parent.name)) {
+      return node.parent.name.text;
+    }
+  }
+  return "<anonymous>";
+}
+
+function callTargetName(expression: ts.LeftHandSideExpression): string {
+  if (ts.isIdentifier(expression)) {
+    return expression.text;
+  }
+  if (ts.isPropertyAccessExpression(expression)) {
+    return expression.name.text;
+  }
+  if (ts.isElementAccessExpression(expression)) {
+    return expression.getText().slice(0, 80);
+  }
+  return expression.getText().slice(0, 80);
+}
+
+function topFrequency(values: string[], limit: number): Array<{ symbol: string; count: number }> {
+  const map = new Map<string, number>();
+  for (const value of values) {
+    map.set(value, (map.get(value) ?? 0) + 1);
+  }
+  return [...map.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, Math.max(1, limit))
+    .map(([symbol, count]) => ({ symbol, count }));
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 export function buildContext(symbols: IndexSymbol[], tokenBudget: number): ContextSelection {

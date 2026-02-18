@@ -41,6 +41,30 @@ describe("indexer", () => {
     expect(freshness.meetsTarget).toBe(true);
   });
 
+  it("builds call graph and rename impact analysis", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "indexer-call-"));
+    const alpha = join(dir, "alpha.ts");
+    const beta = join(dir, "beta.ts");
+    await writeFile(
+      alpha,
+      "export function alpha(){ beta(); }\nexport function beta(){ return 1; }\n",
+      "utf8"
+    );
+    await writeFile(beta, "export function consumer(){ alpha(); }\n", "utf8");
+
+    const indexer = new SymbolIndexer();
+    await indexer.indexFiles(dir, [alpha, beta]);
+
+    const graph = indexer.callGraph(50);
+    expect(graph.edges.some((edge) => edge.from.includes("alpha") && edge.to === "beta")).toBe(true);
+    expect(graph.nodes.length).toBeGreaterThan(0);
+
+    const impact = indexer.analyzeRenameImpact("alpha", "alphaRenamed", 20);
+    expect(impact.filesTouched).toBeGreaterThan(0);
+    expect(impact.totalMatches).toBeGreaterThan(0);
+    expect(impact.impacts.some((entry) => entry.file === "beta.ts")).toBe(true);
+  });
+
   it("builds grounding evidence for changed lines", () => {
     const symbols = [
       {

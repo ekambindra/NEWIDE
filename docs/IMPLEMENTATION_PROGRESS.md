@@ -2,8 +2,8 @@
 
 ## Current Completion
 
-- Completed features: 122/170
-- Completion percentage: 71.8%
+- Completed features: 126/170
+- Completion percentage: 74.1%
 
 ## Latest Implemented Increments
 
@@ -47,6 +47,10 @@
 38. Index freshness target evaluation with explicit small/batch latency pass/fail gating surfaced in diagnostics and audit metadata (IDX-007).
 39. Module summary generation from symbol inventory with dominant kind distribution and concise per-module synopsis in diagnostics UI (IDX-009).
 40. Retrieval priority scoring + context selection using query terms, parse health, symbol density, and token-budgeted selection output (IDX-012).
+41. Call graph extraction over indexed code with node/edge summaries and top caller/callee rankings in diagnostics UI (IDX-005).
+42. Cross-file rename impact analysis with declaration/reference/collision counts and impacted line previews (IDX-014).
+43. Deterministic auto-repair loop with rotating bounded strategies, failure classification, repair hints, and `repair_trace.json` artifacts (AUTO-017).
+44. PR package generation artifacts (`pr_package.json` + `pr_package.md`) including evidence, checks, owners, risks, and rollback notes (AUTO-018).
 
 ## Verification Commands
 

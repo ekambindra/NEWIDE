@@ -275,6 +275,34 @@ type WorkspaceIndexReport = {
       parseHealthy: boolean;
     }>;
   };
+  callGraph: {
+    nodes: string[];
+    edges: Array<{
+      file: string;
+      from: string;
+      to: string;
+      line: number;
+    }>;
+    topCallers: Array<{ symbol: string; count: number }>;
+    topCallees: Array<{ symbol: string; count: number }>;
+  };
+  renameImpact: {
+    from: string;
+    to: string;
+    filesTouched: number;
+    totalMatches: number;
+    declarationMatches: number;
+    referenceMatches: number;
+    collisionMatches: number;
+    impacts: Array<{
+      file: string;
+      totalMatches: number;
+      declarationMatches: number;
+      referenceMatches: number;
+      collisionMatches: number;
+      lines: number[];
+    }>;
+  } | null;
   topFiles: Array<{
     file: string;
     symbols: number;
@@ -578,6 +606,8 @@ export function App() {
   const [indexLimit, setIndexLimit] = useState("1200");
   const [indexQuery, setIndexQuery] = useState("agent runtime checkpoints");
   const [indexTokenBudget, setIndexTokenBudget] = useState("4000");
+  const [indexRenameFrom, setIndexRenameFrom] = useState("runTask");
+  const [indexRenameTo, setIndexRenameTo] = useState("executeTask");
   const [artifactReport, setArtifactReport] = useState<ArtifactCompletenessReport | null>(null);
   const [greenPipelineReport, setGreenPipelineReport] = useState<GreenPipelineReport | null>(null);
   const [autoSaveMode, setAutoSaveMode] = useState<"manual" | "afterDelay" | "onBlur">("manual");
@@ -995,11 +1025,13 @@ export function App() {
       root: workspaceRoot,
       limit,
       query: indexQuery.trim(),
-      tokenBudget
+      tokenBudget,
+      renameFrom: indexRenameFrom.trim(),
+      renameTo: indexRenameTo.trim()
     });
     setIndexReport(report as WorkspaceIndexReport);
     setLogs((prev) => [
-      `[indexer] files=${report.diagnostics.indexedFiles} symbols=${report.diagnostics.totalSymbols} errors=${report.diagnostics.parseErrors} freshness_target=${report.freshnessTargets.meetsTarget ? "pass" : "fail"}`,
+      `[indexer] files=${report.diagnostics.indexedFiles} symbols=${report.diagnostics.totalSymbols} errors=${report.diagnostics.parseErrors} freshness_target=${report.freshnessTargets.meetsTarget ? "pass" : "fail"} call_edges=${report.callGraph.edges.length}`,
       ...prev
     ]);
     await refreshAudit();
@@ -1720,6 +1752,18 @@ export function App() {
                     placeholder="Retrieval query"
                   />
                 </div>
+                <div className="inline-search" style={{ marginBottom: 8 }}>
+                  <input
+                    value={indexRenameFrom}
+                    onChange={(event) => setIndexRenameFrom(event.target.value)}
+                    placeholder="Rename from"
+                  />
+                  <input
+                    value={indexRenameTo}
+                    onChange={(event) => setIndexRenameTo(event.target.value)}
+                    placeholder="Rename to"
+                  />
+                </div>
                 {indexReport ? (
                   <>
                     <code>generated: {indexReport.generatedAt}</code>
@@ -1748,6 +1792,33 @@ export function App() {
                         module {summary.file} | {summary.summary}
                       </code>
                     ))}
+                    <code>
+                      call graph: nodes={indexReport.callGraph.nodes.length} edges={indexReport.callGraph.edges.length}
+                    </code>
+                    {indexReport.callGraph.topCallers.slice(0, 4).map((caller) => (
+                      <code key={`caller-${caller.symbol}`}>
+                        caller {caller.symbol} -&gt; {caller.count}
+                      </code>
+                    ))}
+                    {indexReport.callGraph.edges.slice(0, 5).map((edge, idx) => (
+                      <code key={`edge-${idx}-${edge.file}`}>
+                        edge {edge.file}:{edge.line} {edge.from} -&gt; {edge.to}
+                      </code>
+                    ))}
+                    {indexReport.renameImpact ? (
+                      <>
+                        <code>
+                          rename impact: {indexReport.renameImpact.from} -&gt; {indexReport.renameImpact.to} | files={indexReport.renameImpact.filesTouched} | matches={indexReport.renameImpact.totalMatches} | declarations={indexReport.renameImpact.declarationMatches} | references={indexReport.renameImpact.referenceMatches}
+                        </code>
+                        {indexReport.renameImpact.impacts.slice(0, 5).map((impact) => (
+                          <code key={`rename-${impact.file}`}>
+                            {impact.file} | matches={impact.totalMatches} | collisions={impact.collisionMatches} | lines={impact.lines.join(", ") || "none"}
+                          </code>
+                        ))}
+                      </>
+                    ) : (
+                      <code>rename impact: provide rename from/to and run scan</code>
+                    )}
                   </>
                 ) : (
                   <p className="empty">No index diagnostics yet.</p>

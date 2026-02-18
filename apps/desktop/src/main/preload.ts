@@ -176,6 +176,34 @@ type WorkspaceIndexReport = {
       parseHealthy: boolean;
     }>;
   };
+  callGraph: {
+    nodes: string[];
+    edges: Array<{
+      file: string;
+      from: string;
+      to: string;
+      line: number;
+    }>;
+    topCallers: Array<{ symbol: string; count: number }>;
+    topCallees: Array<{ symbol: string; count: number }>;
+  };
+  renameImpact: {
+    from: string;
+    to: string;
+    filesTouched: number;
+    totalMatches: number;
+    declarationMatches: number;
+    referenceMatches: number;
+    collisionMatches: number;
+    impacts: Array<{
+      file: string;
+      totalMatches: number;
+      declarationMatches: number;
+      referenceMatches: number;
+      collisionMatches: number;
+      lines: number[];
+    }>;
+  } | null;
   topFiles: Array<{
     file: string;
     symbols: number;
@@ -363,6 +391,8 @@ const api = {
     limit?: number;
     query?: string;
     tokenBudget?: number;
+    renameFrom?: string;
+    renameTo?: string;
   }): Promise<WorkspaceIndexReport> => ipcRenderer.invoke("indexer:run", payload),
   getWorkspaceIndexDiagnostics: (root: string): Promise<WorkspaceIndexReport> =>
     ipcRenderer.invoke("indexer:diagnostics", root),

@@ -39,6 +39,10 @@ describe("agent runtime", () => {
     const bundle = await readFile(bundlePath, "utf8");
     expect(bundle.includes("\"tool_calls\"")).toBe(true);
 
+    const prPackagePath = join(root, summary.runId, "pr_package.json");
+    const prPackage = await readFile(prPackagePath, "utf8");
+    expect(prPackage.includes("\"acceptance_criteria\"")).toBe(true);
+
     const runs = await runtime.listRuns();
     expect(runs.some((run) => run.runId === summary.runId)).toBe(true);
 
@@ -107,5 +111,40 @@ describe("agent runtime", () => {
     expect(summary.agentRuns).toHaveLength(3);
     expect(summary.overallStatus).toBe("success");
     expect(summary.coordinatorRunId.startsWith("multi-")).toBe(true);
+  });
+
+  it("uses deterministic repair strategies before succeeding", async () => {
+    const root = await mkdtemp(join(tmpdir(), "runtime-repair-"));
+    const runtime = new AgentRuntime({ checkpointRoot: root, model: "local-test", maxRetries: 4 });
+    let calls = 0;
+
+    runtime.registerTool({
+      name: "echo",
+      run: async () => {
+        calls += 1;
+        if (calls < 3) {
+          return { exitCode: 1 };
+        }
+        return { exitCode: 0 };
+      }
+    });
+
+    const summary = await runtime.runTask({
+      taskType: "task",
+      goal: "repair failing tests",
+      acceptanceCriteria: ["task eventually passes"],
+      requirements: { owners: ["@platform-team"] }
+    });
+
+    expect(summary.status).toBe("success");
+    const repairTracePath = join(root, summary.runId, "step-1", "repair_trace.json");
+    const repairTrace = await readFile(repairTracePath, "utf8");
+    expect(repairTrace.includes("\"baseline_retry\"")).toBe(true);
+    expect(repairTrace.includes("\"targeted_fix\"")).toBe(true);
+
+    const prPackagePath = join(root, summary.runId, "pr_package.json");
+    const prPackage = await readFile(prPackagePath, "utf8");
+    expect(prPackage.includes("@platform-team")).toBe(true);
+    expect(prPackage.includes("\"repair_attempts\"")).toBe(true);
   });
 });

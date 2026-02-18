@@ -68,6 +68,18 @@ type ApprovalPrompt = {
   approved: boolean;
 };
 
+type RepairStrategy = "baseline_retry" | "targeted_fix" | "minimal_change";
+
+type RepairAttempt = {
+  attempt: number;
+  strategy: RepairStrategy;
+  classification: string;
+  status: "success" | "failed";
+  failure: string | null;
+  started_at: string;
+  ended_at: string;
+};
+
 function nowIso(): string {
   return new Date().toISOString();
 }
@@ -147,6 +159,37 @@ function approvalStats(prompts: ApprovalPrompt[]): {
   };
 }
 
+function strategyForAttempt(attempt: number): RepairStrategy {
+  const ordered: RepairStrategy[] = ["baseline_retry", "targeted_fix", "minimal_change"];
+  return ordered[(attempt - 1) % ordered.length] ?? "baseline_retry";
+}
+
+function classifyFailure(message: string | null): string {
+  const normalized = (message ?? "").toLowerCase();
+  if (!normalized) return "unknown";
+  if (normalized.includes("timeout")) return "timeout";
+  if (normalized.includes("policy") || normalized.includes("approval")) return "policy";
+  if (normalized.includes("syntax") || normalized.includes("parse")) return "syntax";
+  if (normalized.includes("missing") || normalized.includes("not found")) return "missing_dependency";
+  if (normalized.includes("test") || normalized.includes("assert")) return "test_failure";
+  return "runtime_failure";
+}
+
+function repairHint(classification: string, nextStrategy: RepairStrategy): string {
+  return `repair classification=${classification}; next_strategy=${nextStrategy}`;
+}
+
+function normalizeOwners(requirements?: Record<string, unknown>): string[] {
+  const raw = requirements?.owners;
+  if (Array.isArray(raw)) {
+    return raw.filter((item): item is string => typeof item === "string").map((item) => item.trim()).filter(Boolean);
+  }
+  if (typeof raw === "string") {
+    return raw.split(/[,;\n]+/g).map((item) => item.trim()).filter(Boolean);
+  }
+  return [];
+}
+
 async function writeFinalizationArtifacts(input: {
   runRoot: string;
   runId: string;
@@ -194,6 +237,93 @@ async function writeFinalizationArtifacts(input: {
     },
     generated_at: generatedAt
   });
+}
+
+async function writePrPackageArtifacts(input: {
+  runRoot: string;
+  runId: string;
+  status: "success" | "failed" | "blocked";
+  goal: string;
+  acceptanceCriteria: string[];
+  checks: StepResult["checks"];
+  summary: string;
+  risks: string[];
+  rollback: string;
+  toolCalls: number;
+  attempts: number;
+  approvals: ApprovalPrompt[];
+  repairAttempts: RepairAttempt[];
+  requirements?: Record<string, unknown>;
+}): Promise<void> {
+  const owners = normalizeOwners(input.requirements);
+  const generatedAt = nowIso();
+  const checklist = {
+    summary: Boolean(input.summary),
+    tests: input.checks.test !== "skip",
+    risks: input.risks.length > 0 || input.status !== "success",
+    rollback: Boolean(input.rollback),
+    owners: owners.length > 0
+  };
+  const packageJson = {
+    run_id: input.runId,
+    status: input.status,
+    title: `Atlas Meridian: ${input.goal.slice(0, 120)}`,
+    summary: input.summary,
+    acceptance_criteria: input.acceptanceCriteria,
+    checks: input.checks,
+    risks: input.risks,
+    rollback: input.rollback,
+    owners,
+    approvals: approvalStats(input.approvals),
+    evidence: {
+      artifacts: [
+        "step-1/plan.json",
+        "step-1/patch.diff",
+        "step-1/tool_calls.jsonl",
+        "step-1/results.json",
+        "step-1/repair_trace.json",
+        "finalization_bundle.json"
+      ],
+      tool_calls: input.toolCalls,
+      attempts: input.attempts,
+      repair_attempts: input.repairAttempts.length
+    },
+    changelog_draft: [
+      `${input.status.toUpperCase()}: ${input.summary}`,
+      `Attempts: ${input.attempts}; Tool calls: ${input.toolCalls}`,
+      `Checks: lint=${input.checks.lint} typecheck=${input.checks.typecheck} test=${input.checks.test} build=${input.checks.build}`
+    ],
+    checklist,
+    generated_at: generatedAt
+  };
+
+  await writeJson(join(input.runRoot, "pr_package.json"), packageJson);
+  const markdown = [
+    `# PR Package: ${input.runId}`,
+    "",
+    `Status: ${input.status}`,
+    `Summary: ${input.summary}`,
+    "",
+    "## Acceptance Criteria",
+    ...input.acceptanceCriteria.map((item) => `- ${item}`),
+    "",
+    "## Checks",
+    `- lint: ${input.checks.lint}`,
+    `- typecheck: ${input.checks.typecheck}`,
+    `- test: ${input.checks.test}`,
+    `- build: ${input.checks.build}`,
+    "",
+    "## Risks",
+    ...(input.risks.length > 0 ? input.risks.map((risk) => `- ${risk}`) : ["- none"]),
+    "",
+    "## Rollback",
+    `- ${input.rollback}`,
+    "",
+    "## Owners",
+    ...(owners.length > 0 ? owners.map((owner) => `- ${owner}`) : ["- unassigned"]),
+    ""
+  ].join("\n");
+  await writeFile(join(input.runRoot, "pr_package.md"), `${markdown}\n`, "utf8");
 }
 
 export class AgentRuntime {
@@ -283,6 +413,22 @@ export class AgentRuntime {
         attempts: 0,
         approvals: approvalPrompts
       });
+      await writePrPackageArtifacts({
+        runRoot,
+        runId,
+        status: "blocked",
+        goal: task.goal,
+        acceptanceCriteria: task.acceptanceCriteria,
+        checks: blocked.checks,
+        summary: "run blocked pending high-risk approvals",
+        risks: pendingApprovals.map((prompt) => prompt.reason),
+        rollback: "no edits applied",
+        toolCalls: 0,
+        attempts: 0,
+        approvals: approvalPrompts,
+        repairAttempts: [],
+        requirements: task.requirements
+      });
       await this.finalizeManifest(runRoot, "blocked");
       return { runId, status: "blocked", steps: 1 };
     }
@@ -311,6 +457,22 @@ export class AgentRuntime {
         toolCalls: 0,
         attempts: 0,
         approvals: approvalPrompts
+      });
+      await writePrPackageArtifacts({
+        runRoot,
+        runId,
+        status: "failed",
+        goal: task.goal,
+        acceptanceCriteria: task.acceptanceCriteria,
+        checks: failed.checks,
+        summary: "run failed before execution",
+        risks: ["missing required tool"],
+        rollback: "no rollback required",
+        toolCalls: 0,
+        attempts: 0,
+        approvals: approvalPrompts,
+        repairAttempts: [],
+        requirements: task.requirements
       });
       await this.finalizeManifest(runRoot, "failed");
       return { runId, status: "failed", steps: 1 };
@@ -342,6 +504,22 @@ export class AgentRuntime {
         attempts: 0,
         approvals: approvalPrompts
       });
+      await writePrPackageArtifacts({
+        runRoot,
+        runId,
+        status: "blocked",
+        goal: task.goal,
+        acceptanceCriteria: task.acceptanceCriteria,
+        checks: blocked.checks,
+        summary: "run blocked by policy",
+        risks: [gate.reason],
+        rollback: "no edits applied",
+        toolCalls: 0,
+        attempts: 0,
+        approvals: approvalPrompts,
+        repairAttempts: [],
+        requirements: task.requirements
+      });
       await this.finalizeManifest(runRoot, "blocked");
       return { runId, status: "blocked", steps: 1 };
     }
@@ -349,20 +527,29 @@ export class AgentRuntime {
     let attempt = 0;
     let succeeded = false;
     let lastFailure: string | null = null;
+    let nextRepairHint = "";
     const toolCalls: ToolCall[] = [];
+    const repairAttempts: RepairAttempt[] = [];
 
     while (attempt < this.maxRetries && !succeeded) {
       attempt += 1;
+      const strategy = strategyForAttempt(attempt);
       const callId = randomUUID();
       const started = nowIso();
       try {
-        const result = await tool.run({ goal: task.goal, attempt });
+        const args = {
+          goal: task.goal,
+          attempt,
+          strategy,
+          repair_hint: nextRepairHint
+        };
+        const result = await tool.run(args);
         const ended = nowIso();
         toolCalls.push({
           id: callId,
           step_id: stepId,
           tool: tool.name,
-          args: { goal: task.goal, attempt },
+          args,
           started_at: started,
           ended_at: ended,
           exit_code: result.exitCode,
@@ -372,23 +559,70 @@ export class AgentRuntime {
         succeeded = result.exitCode === 0;
         if (!succeeded) {
           lastFailure = `attempt ${attempt} failed`;
+          const classification = classifyFailure(lastFailure);
+          nextRepairHint = repairHint(classification, strategyForAttempt(attempt + 1));
+          repairAttempts.push({
+            attempt,
+            strategy,
+            classification,
+            status: "failed",
+            failure: lastFailure,
+            started_at: started,
+            ended_at: ended
+          });
+        } else {
+          repairAttempts.push({
+            attempt,
+            strategy,
+            classification: "success",
+            status: "success",
+            failure: null,
+            started_at: started,
+            ended_at: ended
+          });
         }
       } catch (error) {
         const ended = nowIso();
+        const failure = error instanceof Error ? error.message : "unknown tool failure";
+        const classification = classifyFailure(failure);
+        nextRepairHint = repairHint(classification, strategyForAttempt(attempt + 1));
         toolCalls.push({
           id: callId,
           step_id: stepId,
           tool: tool.name,
-          args: { goal: task.goal, attempt },
+          args: {
+            goal: task.goal,
+            attempt,
+            strategy,
+            repair_hint: nextRepairHint
+          },
           started_at: started,
           ended_at: ended,
           exit_code: 1,
           status: "error",
           output_ref: null
         });
-        lastFailure = error instanceof Error ? error.message : "unknown tool failure";
+        lastFailure = failure;
+        repairAttempts.push({
+          attempt,
+          strategy,
+          classification,
+          status: "failed",
+          failure,
+          started_at: started,
+          ended_at: ended
+        });
       }
     }
+
+    await writeJson(join(stepRoot, "repair_trace.json"), {
+      run_id: runId,
+      step_id: stepId,
+      max_retries: this.maxRetries,
+      exhausted: !succeeded,
+      attempts: repairAttempts,
+      generated_at: nowIso()
+    });
 
     await writeFile(
       join(stepRoot, "tool_calls.jsonl"),
@@ -418,9 +652,11 @@ export class AgentRuntime {
       metrics: {
         attempts: attempt,
         tool_calls: toolCalls.length,
-        deterministic_hash_length: deterministicSeed.length
+        deterministic_hash_length: deterministicSeed.length,
+        repair_attempts: repairAttempts.length,
+        repair_failures: repairAttempts.filter((item) => item.status === "failed").length
       },
-      next_action: succeeded ? null : "repair"
+      next_action: succeeded ? null : "repair_exhausted"
     };
 
     await writeJson(join(stepRoot, "results.json"), result);
@@ -432,18 +668,42 @@ export class AgentRuntime {
       previous_hash: null
     });
 
+    const finalSummary =
+      succeeded && attempt > 1
+        ? "task completed after deterministic auto-repair"
+        : succeeded
+          ? "task completed successfully"
+          : "task failed after bounded retries";
+    const finalRisks = succeeded ? [] : [lastFailure ?? "unknown failure"];
+
     await writeFinalizationArtifacts({
       runRoot,
       runId,
       status: succeeded ? "success" : "failed",
-      summary: succeeded ? "task completed successfully" : "task failed after bounded retries",
-      risks: succeeded ? [] : [lastFailure ?? "unknown failure"],
+      summary: finalSummary,
+      risks: finalRisks,
       rollback: "restore from previous checkpoint or revert patch.diff",
       checks: result.checks,
       steps: 1,
       toolCalls: toolCalls.length,
       attempts: attempt,
       approvals: approvalPrompts
+    });
+    await writePrPackageArtifacts({
+      runRoot,
+      runId,
+      status: succeeded ? "success" : "failed",
+      goal: task.goal,
+      acceptanceCriteria: task.acceptanceCriteria,
+      checks: result.checks,
+      summary: finalSummary,
+      risks: finalRisks,
+      rollback: "restore from previous checkpoint or revert patch.diff",
+      toolCalls: toolCalls.length,
+      attempts: attempt,
+      approvals: approvalPrompts,
+      repairAttempts,
+      requirements: task.requirements
     });
 
     await this.finalizeManifest(runRoot, succeeded ? "success" : "failed");

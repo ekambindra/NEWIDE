@@ -16,9 +16,11 @@ import {
   SymbolIndexer,
   buildGroundingEvidence,
   evaluateFreshnessTargets,
+  type CallGraphReport,
   type IndexerDiagnostics,
   type FreshnessTargetReport,
   type ModuleSummary,
+  type RenameImpactReport,
   type RepoMapEntry
 } from "@ide/indexer";
 import ts from "typescript";
@@ -256,6 +258,8 @@ type WorkspaceIndexReport = {
       parseHealthy: boolean;
     }>;
   };
+  callGraph: CallGraphReport;
+  renameImpact: RenameImpactReport | null;
   topFiles: Array<{
     file: string;
     symbols: number;
@@ -1219,7 +1223,9 @@ async function runWorkspaceIndex(
   root: string,
   limit = 1200,
   query = "",
-  tokenBudget = 4000
+  tokenBudget = 4000,
+  renameFrom = "",
+  renameTo = ""
 ): Promise<WorkspaceIndexReport> {
   const files = await discoverIndexableFiles(root, limit);
   const absoluteFiles = files.map((file) => resolve(root, file));
@@ -1240,6 +1246,15 @@ async function runWorkspaceIndex(
     Math.max(300, Math.min(12000, Number(tokenBudget) || 4000)),
     25
   );
+  const callGraph = workspaceIndexer.callGraph(800);
+  const renameImpact =
+    renameFrom.trim().length > 0
+      ? workspaceIndexer.analyzeRenameImpact(
+          renameFrom.trim(),
+          renameTo.trim(),
+          80
+        )
+      : null;
 
   const topFiles = repoMap.slice(0, 20).map((entry) => {
     const diag = fileMap.get(normalizeRepoPath(entry.file));
@@ -1266,6 +1281,8 @@ async function runWorkspaceIndex(
       files: retrieval.selected.files,
       candidates: retrieval.candidates
     },
+    callGraph,
+    renameImpact,
     topFiles
   };
   workspaceIndexReports.set(root, report);
@@ -2570,13 +2587,22 @@ app.whenReady().then(async () => {
     "indexer:run",
     async (
       _event,
-      payload: { root: string; limit?: number; query?: string; tokenBudget?: number }
+      payload: {
+        root: string;
+        limit?: number;
+        query?: string;
+        tokenBudget?: number;
+        renameFrom?: string;
+        renameTo?: string;
+      }
     ): Promise<WorkspaceIndexReport> => {
       const report = await runWorkspaceIndex(
         payload.root,
         payload.limit ?? 1200,
         payload.query ?? "",
-        payload.tokenBudget ?? 4000
+        payload.tokenBudget ?? 4000,
+        payload.renameFrom ?? "",
+        payload.renameTo ?? ""
       );
       await appendAuditEvent({
         action: "indexer.run",
@@ -2589,7 +2615,9 @@ app.whenReady().then(async () => {
           parse_errors: report.diagnostics.parseErrors,
           freshness_small_within_target: report.freshnessTargets.smallWithinTarget,
           freshness_batch_within_target: report.freshnessTargets.batchWithinTarget,
-          retrieval_candidates: report.retrieval.candidates.length
+          retrieval_candidates: report.retrieval.candidates.length,
+          call_graph_edges: report.callGraph.edges.length,
+          rename_impact_files: report.renameImpact?.filesTouched ?? 0
         }
       });
       return report;
@@ -2601,7 +2629,7 @@ app.whenReady().then(async () => {
     if (existing) {
       return existing;
     }
-    return runWorkspaceIndex(root, 1200, "", 4000);
+    return runWorkspaceIndex(root, 1200, "", 4000, "", "");
   });
 
   ipcMain.handle(

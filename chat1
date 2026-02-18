@@ -38,9 +38,13 @@ Project: Atlas Meridian (enterprise AI IDE)
 3. Added index freshness target gate computation and diagnostics/audit exposure (IDX-007).
 4. Added module summary generation in index pipeline and diagnostics UI (IDX-009).
 5. Added retrieval priority scoring with query + token budget context selection in index diagnostics (IDX-012).
+6. Added index call graph extraction with caller/callee ranking and edge previews in diagnostics (IDX-005).
+7. Added cross-file rename impact analysis with declaration/reference/collision metrics and affected line previews (IDX-014).
+8. Added deterministic auto-repair strategies and bounded repair trace artifacts in runtime (`repair_trace.json`) (AUTO-017).
+9. Added PR package artifact generation (`pr_package.json`, `pr_package.md`) including evidence/risk/rollback/owners (AUTO-018).
 
 ## Current Progress Snapshot
-- Feature tracker currently records: 122/170 (71.8%).
+- Feature tracker currently records: 126/170 (74.1%).
 - In-progress areas include advanced indexing, autonomy builder extensions, enterprise SSO/RBAC/security layers, release hardening, and full benchmark KPIs.
 
 ## Continuation Rules
@@ -53,6 +57,6 @@ Project: Atlas Meridian (enterprise AI IDE)
 4. Never continue implementation before reading latest `chatN` continuity file.
 
 ## Immediate Next Tasks
-1. Continue next in-progress features: IDX-005/IDX-014 and AUTO-017/AUTO-018.
+1. Continue next in-progress autonomy builder features: AUTO-002, AUTO-004, AUTO-005, AUTO-006, AUTO-007.
 2. Continue enterprise/public release pipeline milestones.
 3. Keep extending benchmark/KPI gates and regression-blocking CI behavior.
