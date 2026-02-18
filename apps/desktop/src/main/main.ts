@@ -13,6 +13,12 @@ import { app, BrowserWindow, dialog, ipcMain } from "electron";
 import ignore from "ignore";
 import { AgentRuntime } from "@ide/agent-runtime";
 import ts from "typescript";
+import {
+  detectCommandRisk,
+  parseTestOutput,
+  type CommandRiskAssessment,
+  type ParsedTestSummary
+} from "./terminal-utils.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -44,6 +50,37 @@ type TerminalResult = {
   stdout: string;
   stderr: string;
   policy: PolicyResult;
+  highRisk: CommandRiskAssessment | null;
+  parsedTest: ParsedTestSummary | null;
+  artifactPath: string | null;
+};
+
+type CheckStatus = "pass" | "fail" | "skip";
+type PipelineStageName = "lint" | "typecheck" | "test" | "build";
+
+type PipelineStageResult = {
+  stage: PipelineStageName;
+  command: string;
+  exitCode: number | null;
+  stdout: string;
+  stderr: string;
+  status: "pass" | "fail" | "skip" | "blocked";
+  policy: PolicyResult;
+  highRisk: CommandRiskAssessment | null;
+  parsedTest: ParsedTestSummary | null;
+};
+
+type PipelineRunResult = {
+  id: string;
+  status: "success" | "failed" | "blocked";
+  checks: {
+    lint: CheckStatus;
+    typecheck: CheckStatus;
+    test: CheckStatus;
+    build: CheckStatus;
+  };
+  stages: PipelineStageResult[];
+  blockedStage: PipelineStageName | null;
   artifactPath: string | null;
 };
 
@@ -168,6 +205,29 @@ function commandPolicy(command: string): PolicyResult {
     };
   }
   return { decision: "allow", reason: "allowed by balanced policy" };
+}
+
+function defaultPipelineCommands(): Record<PipelineStageName, string> {
+  return {
+    lint: "npm run lint",
+    typecheck: "npm run typecheck",
+    test: "npm run test",
+    build: "npm run build"
+  };
+}
+
+function emptyChecks(): {
+  lint: CheckStatus;
+  typecheck: CheckStatus;
+  test: CheckStatus;
+  build: CheckStatus;
+} {
+  return {
+    lint: "skip",
+    typecheck: "skip",
+    test: "skip",
+    build: "skip"
+  };
 }
 
 async function appendAuditEvent(input: {
@@ -1005,7 +1065,47 @@ async function executeCommand(root: string, command: string): Promise<{ exitCode
   }
 }
 
-async function writeTerminalCheckpoint(command: string, result: { exitCode: number | null; stdout: string; stderr: string; policy: PolicyResult }): Promise<string> {
+function inferChecksFromCommand(
+  command: string,
+  exitCode: number | null,
+  parsedTest: ParsedTestSummary | null
+): {
+  lint: CheckStatus;
+  typecheck: CheckStatus;
+  test: CheckStatus;
+  build: CheckStatus;
+} {
+  const checks = emptyChecks();
+  const checkStatus: CheckStatus =
+    exitCode === null ? "skip" : exitCode === 0 ? "pass" : "fail";
+
+  if (/\blint\b/i.test(command)) {
+    checks.lint = checkStatus;
+  }
+  if (/\b(typecheck|tsc)\b/i.test(command)) {
+    checks.typecheck = checkStatus;
+  }
+  if (/\b(test|vitest|jest|pytest)\b/i.test(command)) {
+    checks.test = parsedTest ? (parsedTest.failed > 0 ? "fail" : "pass") : checkStatus;
+  }
+  if (/\bbuild\b/i.test(command)) {
+    checks.build = checkStatus;
+  }
+  return checks;
+}
+
+async function writeTerminalCheckpoint(input: {
+  command: string;
+  result: {
+    exitCode: number | null;
+    stdout: string;
+    stderr: string;
+    policy: PolicyResult;
+    highRisk: CommandRiskAssessment | null;
+    parsedTest: ParsedTestSummary | null;
+  };
+}): Promise<string> {
+  const { command, result } = input;
   const runId = `terminal-${Date.now()}-${randomUUID().slice(0, 8)}`;
   const runRoot = join(checkpointsRoot(), runId);
   const stepRoot = join(runRoot, "step-1");
@@ -1074,11 +1174,14 @@ async function writeTerminalCheckpoint(command: string, result: { exitCode: numb
     `${JSON.stringify(
       {
         status: result.exitCode === 0 ? "success" : result.exitCode === null ? "blocked" : "failed",
-        checks: { lint: "skip", typecheck: "skip", test: "skip", build: "skip" },
+        checks: inferChecksFromCommand(command, result.exitCode, result.parsedTest),
         failures: result.exitCode === 0 ? [] : [result.stderr || result.policy.reason],
         metrics: {
           stdout_length: result.stdout.length,
-          stderr_length: result.stderr.length
+          stderr_length: result.stderr.length,
+          high_risk_categories: result.highRisk?.categories.length ?? 0,
+          parsed_test_total: result.parsedTest?.total ?? 0,
+          parsed_test_failed: result.parsedTest?.failed ?? 0
         },
         next_action: result.exitCode === null ? "approval" : null
       },
@@ -1091,6 +1194,230 @@ async function writeTerminalCheckpoint(command: string, result: { exitCode: numb
   await fs.writeFile(join(stepRoot, "patch.diff"), "\n", "utf8");
 
   return runRoot;
+}
+
+async function writePipelineCheckpoint(input: {
+  stages: PipelineStageResult[];
+  checks: {
+    lint: CheckStatus;
+    typecheck: CheckStatus;
+    test: CheckStatus;
+    build: CheckStatus;
+  };
+  status: "success" | "failed" | "blocked";
+}): Promise<string> {
+  const runId = `pipeline-${Date.now()}-${randomUUID().slice(0, 8)}`;
+  const runRoot = join(checkpointsRoot(), runId);
+  const stepRoot = join(runRoot, "step-1");
+  await fs.mkdir(stepRoot, { recursive: true });
+  const startedAt = nowIso();
+
+  await fs.writeFile(
+    join(runRoot, "manifest.json"),
+    `${JSON.stringify(
+      {
+        run_id: runId,
+        task_type: "terminal_pipeline",
+        repo_snapshot: "workspace",
+        model: "local-shell",
+        policy_version: "balanced-v1",
+        started_at: startedAt,
+        ended_at: nowIso(),
+        final_status: input.status
+      },
+      null,
+      2
+    )}\n`,
+    "utf8"
+  );
+
+  await fs.writeFile(
+    join(stepRoot, "plan.json"),
+    `${JSON.stringify(
+      {
+        run_id: runId,
+        step_id: "step-1",
+        goal: "run validation pipeline",
+        acceptance_criteria: ["lint/typecheck/test/build executed", "structured test parsing captured"],
+        risks: ["policy block", "command failure", "missing script"],
+        policy_context: { mode: "balanced", stages: input.stages.map((stage) => stage.stage) },
+        deterministic_seed: createHash("sha1")
+          .update(input.stages.map((stage) => `${stage.stage}:${stage.command}`).join("|"))
+          .digest("hex")
+      },
+      null,
+      2
+    )}\n`,
+    "utf8"
+  );
+
+  const calls = input.stages.map((stage) => ({
+    id: randomUUID(),
+    step_id: "step-1",
+    tool: "terminal",
+    args: { stage: stage.stage, command: stage.command },
+    started_at: startedAt,
+    ended_at: nowIso(),
+    exit_code: stage.exitCode,
+    status:
+      stage.status === "pass" || stage.status === "skip"
+        ? "success"
+        : stage.status === "blocked"
+          ? "blocked"
+          : "error",
+    output_ref: null
+  }));
+  await fs.writeFile(
+    join(stepRoot, "tool_calls.jsonl"),
+    `${calls.map((call) => JSON.stringify(call)).join("\n")}\n`,
+    "utf8"
+  );
+
+  const failures = input.stages
+    .filter((stage) => stage.status === "fail" || stage.status === "blocked")
+    .map((stage) => `${stage.stage}: ${stage.stderr || stage.policy.reason}`);
+
+  await fs.writeFile(
+    join(stepRoot, "results.json"),
+    `${JSON.stringify(
+      {
+        status: input.status,
+        checks: input.checks,
+        failures,
+        metrics: {
+          stages: input.stages.length,
+          failed_stages: input.stages.filter((stage) => stage.status === "fail").length,
+          blocked_stages: input.stages.filter((stage) => stage.status === "blocked").length,
+          parsed_test_failed: input.stages
+            .map((stage) => stage.parsedTest?.failed ?? 0)
+            .reduce((sum, value) => sum + value, 0)
+        },
+        next_action: input.status === "blocked" ? "approval" : input.status === "failed" ? "repair" : null
+      },
+      null,
+      2
+    )}\n`,
+    "utf8"
+  );
+  await fs.writeFile(join(stepRoot, "patch.diff"), "\n", "utf8");
+
+  return runRoot;
+}
+
+async function runPipeline(
+  root: string,
+  commands?: Partial<Record<PipelineStageName, string>>
+): Promise<PipelineRunResult> {
+  const defaults = defaultPipelineCommands();
+  const orderedStages: PipelineStageName[] = ["lint", "typecheck", "test", "build"];
+  const stages: PipelineStageResult[] = [];
+  const checks = emptyChecks();
+  let blockedStage: PipelineStageName | null = null;
+
+  for (const stage of orderedStages) {
+    const command = (commands?.[stage] ?? defaults[stage]).trim();
+    if (!command) {
+      stages.push({
+        stage,
+        command,
+        exitCode: 0,
+        stdout: "",
+        stderr: "",
+        status: "skip",
+        policy: { decision: "allow", reason: "stage skipped by empty command" },
+        highRisk: null,
+        parsedTest: null
+      });
+      checks[stage] = "skip";
+      continue;
+    }
+
+    const highRisk = detectCommandRisk(command);
+    let policy = commandPolicy(command);
+    if (policy.decision === "allow" && highRisk.requiresApproval) {
+      policy = {
+        decision: "require_approval",
+        reason: highRisk.prompt ?? "high-risk command requires approval"
+      };
+    }
+
+    if (policy.decision === "deny") {
+      stages.push({
+        stage,
+        command,
+        exitCode: 1,
+        stdout: "",
+        stderr: policy.reason,
+        status: "fail",
+        policy,
+        highRisk,
+        parsedTest: null
+      });
+      checks[stage] = "fail";
+      break;
+    }
+
+    if (policy.decision === "require_approval") {
+      blockedStage = stage;
+      stages.push({
+        stage,
+        command,
+        exitCode: null,
+        stdout: "",
+        stderr: policy.reason,
+        status: "blocked",
+        policy,
+        highRisk,
+        parsedTest: null
+      });
+      checks[stage] = "skip";
+      break;
+    }
+
+    const run = await executeCommand(root, command);
+    const parsedTest =
+      stage === "test" ? parseTestOutput(command, run.stdout, run.stderr) : null;
+    const stageStatus = run.exitCode === 0 ? "pass" : "fail";
+    checks[stage] =
+      stage === "test" && parsedTest ? (parsedTest.failed > 0 ? "fail" : "pass") : stageStatus;
+
+    stages.push({
+      stage,
+      command,
+      exitCode: run.exitCode,
+      stdout: run.stdout,
+      stderr: run.stderr,
+      status: stageStatus,
+      policy,
+      highRisk,
+      parsedTest
+    });
+
+    if (stageStatus === "fail" || checks[stage] === "fail") {
+      break;
+    }
+  }
+
+  const status: PipelineRunResult["status"] =
+    blockedStage ? "blocked"
+    : stages.some((stage) => stage.status === "fail" || stage.status === "blocked")
+      ? "failed"
+      : "success";
+
+  const artifactPath = await writePipelineCheckpoint({
+    stages,
+    checks,
+    status
+  });
+
+  return {
+    id: randomUUID(),
+    status,
+    checks,
+    stages,
+    blockedStage,
+    artifactPath
+  };
 }
 
 async function listCheckpoints(): Promise<Array<{ runId: string; path: string }>> {
@@ -1331,7 +1658,14 @@ app.whenReady().then(async () => {
   });
 
   ipcMain.handle("terminal:run", async (_event, root: string, command: string): Promise<TerminalResult> => {
-    const policy = commandPolicy(command);
+    const highRisk = detectCommandRisk(command);
+    let policy = commandPolicy(command);
+    if (policy.decision === "allow" && highRisk.requiresApproval) {
+      policy = {
+        decision: "require_approval",
+        reason: highRisk.prompt ?? "high-risk command requires approval"
+      };
+    }
 
     if (policy.decision === "deny") {
       await appendAuditEvent({
@@ -1339,13 +1673,18 @@ app.whenReady().then(async () => {
         target: command,
         decision: "deny",
         reason: policy.reason,
-        metadata: { root }
+        metadata: { root, highRisk: highRisk.categories }
       });
-      const artifactPath = await writeTerminalCheckpoint(command, {
-        exitCode: 1,
-        stdout: "",
-        stderr: policy.reason,
-        policy
+      const artifactPath = await writeTerminalCheckpoint({
+        command,
+        result: {
+          exitCode: 1,
+          stdout: "",
+          stderr: policy.reason,
+          policy,
+          highRisk,
+          parsedTest: null
+        }
       });
       return {
         id: randomUUID(),
@@ -1354,6 +1693,8 @@ app.whenReady().then(async () => {
         stdout: "",
         stderr: policy.reason,
         policy,
+        highRisk,
+        parsedTest: null,
         artifactPath
       };
     }
@@ -1364,13 +1705,18 @@ app.whenReady().then(async () => {
         target: command,
         decision: "require_approval",
         reason: policy.reason,
-        metadata: { root }
+        metadata: { root, highRisk: highRisk.categories }
       });
-      const artifactPath = await writeTerminalCheckpoint(command, {
-        exitCode: null,
-        stdout: "",
-        stderr: policy.reason,
-        policy
+      const artifactPath = await writeTerminalCheckpoint({
+        command,
+        result: {
+          exitCode: null,
+          stdout: "",
+          stderr: policy.reason,
+          policy,
+          highRisk,
+          parsedTest: null
+        }
       });
       return {
         id: randomUUID(),
@@ -1379,16 +1725,24 @@ app.whenReady().then(async () => {
         stdout: "",
         stderr: policy.reason,
         policy,
+        highRisk,
+        parsedTest: null,
         artifactPath
       };
     }
 
     const run = await executeCommand(root, command);
-    const artifactPath = await writeTerminalCheckpoint(command, {
-      exitCode: run.exitCode,
-      stdout: run.stdout,
-      stderr: run.stderr,
-      policy
+    const parsedTest = parseTestOutput(command, run.stdout, run.stderr);
+    const artifactPath = await writeTerminalCheckpoint({
+      command,
+      result: {
+        exitCode: run.exitCode,
+        stdout: run.stdout,
+        stderr: run.stderr,
+        policy,
+        highRisk,
+        parsedTest
+      }
     });
 
     await appendAuditEvent({
@@ -1396,7 +1750,13 @@ app.whenReady().then(async () => {
       target: command,
       decision: run.exitCode === 0 ? "executed" : "error",
       reason: run.exitCode === 0 ? "command succeeded" : "command failed",
-      metadata: { root, exitCode: run.exitCode, artifactPath }
+      metadata: {
+        root,
+        exitCode: run.exitCode,
+        artifactPath,
+        highRisk: highRisk.categories,
+        parsedTestFailed: parsedTest?.failed ?? 0
+      }
     });
 
     return {
@@ -1406,11 +1766,14 @@ app.whenReady().then(async () => {
       stdout: run.stdout,
       stderr: run.stderr,
       policy,
+      highRisk,
+      parsedTest,
       artifactPath
     };
   });
 
   ipcMain.handle("terminal:run-approved", async (_event, root: string, command: string): Promise<TerminalResult> => {
+    const highRisk = detectCommandRisk(command);
     const policy = commandPolicy(command);
     if (policy.decision === "deny") {
       await appendAuditEvent({
@@ -1427,23 +1790,37 @@ app.whenReady().then(async () => {
         stdout: "",
         stderr: "command remains denied by policy",
         policy,
+        highRisk,
+        parsedTest: null,
         artifactPath: null
       };
     }
 
     const run = await executeCommand(root, command);
-    const artifactPath = await writeTerminalCheckpoint(command, {
-      exitCode: run.exitCode,
-      stdout: run.stdout,
-      stderr: run.stderr,
-      policy: { decision: "allow", reason: "approved by user" }
+    const parsedTest = parseTestOutput(command, run.stdout, run.stderr);
+    const artifactPath = await writeTerminalCheckpoint({
+      command,
+      result: {
+        exitCode: run.exitCode,
+        stdout: run.stdout,
+        stderr: run.stderr,
+        policy: { decision: "allow", reason: "approved by user" },
+        highRisk,
+        parsedTest
+      }
     });
     await appendAuditEvent({
       action: "terminal.approved_run",
       target: command,
       decision: run.exitCode === 0 ? "executed" : "error",
       reason: "command executed via approval flow",
-      metadata: { root, artifactPath, exitCode: run.exitCode }
+      metadata: {
+        root,
+        artifactPath,
+        exitCode: run.exitCode,
+        highRisk: highRisk.categories,
+        parsedTestFailed: parsedTest?.failed ?? 0
+      }
     });
 
     return {
@@ -1453,9 +1830,44 @@ app.whenReady().then(async () => {
       stdout: run.stdout,
       stderr: run.stderr,
       policy: { decision: "allow", reason: "approved by user" },
+      highRisk,
+      parsedTest,
       artifactPath
     };
   });
+
+  ipcMain.handle(
+    "terminal:run-pipeline",
+    async (
+      _event,
+      root: string,
+      commands?: Partial<Record<PipelineStageName, string>>
+    ): Promise<PipelineRunResult> => {
+      const result = await runPipeline(root, commands);
+      await appendAuditEvent({
+        action: "terminal.pipeline.run",
+        target: root,
+        decision:
+          result.status === "success"
+            ? "executed"
+            : result.status === "blocked"
+              ? "require_approval"
+              : "error",
+        reason: `pipeline ${result.status}`,
+        metadata: {
+          checks: result.checks,
+          blocked_stage: result.blockedStage,
+          stages: result.stages.map((stage) => ({
+            stage: stage.stage,
+            status: stage.status,
+            exitCode: stage.exitCode
+          })),
+          artifactPath: result.artifactPath
+        }
+      });
+      return result;
+    }
+  );
 
   ipcMain.handle("terminal:replay", async (_event, limit = 20) => {
     return replayTerminal(Math.max(1, Math.min(200, Number(limit) || 20)));

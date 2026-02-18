@@ -2,8 +2,8 @@
 
 ## Current Completion
 
-- Completed features: 105/170
-- Completion percentage: 61.8%
+- Completed features: 109/170
+- Completion percentage: 64.1%
 
 ## Latest Implemented Increments
 
@@ -29,6 +29,10 @@
 20. Ownership conflict detection for concurrent multi-agent assignments.
 21. Diff churn statistics panel for changed lines/chunks and decision state (DIFF-011).
 22. Sensitive-file change highlighting in diff approval workflow (DIFF-009).
+23. Agent runtime high-risk approval prompts with `approval_prompts.json` checkpoint artifacts (AGENT-019).
+24. Agent runtime finalization bundles with approvals/evidence/rollback metadata (`finalization_bundle.json`) (AGENT-020).
+25. Terminal validation pipeline runner (`lint -> typecheck -> test -> build`) with checkpoint/audit integration (TERM-006).
+26. Structured test output parsing for Vitest/Jest/Pytest/JUnit surfaced in desktop test views (TERM-007).
 
 ## Verification Commands
 

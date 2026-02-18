@@ -24,6 +24,53 @@ type TerminalResult = {
     decision: "allow" | "deny" | "require_approval";
     reason: string;
   };
+  highRisk: {
+    requiresApproval: boolean;
+    categories: string[];
+    reasons: string[];
+    prompt: string | null;
+  } | null;
+  parsedTest: {
+    framework: "vitest" | "jest" | "pytest" | "junit" | "unknown";
+    total: number;
+    passed: number;
+    failed: number;
+    skipped: number;
+    durationMs: number | null;
+    rawSignal: string;
+  } | null;
+  artifactPath: string | null;
+};
+
+type PipelineResult = {
+  id: string;
+  status: "success" | "failed" | "blocked";
+  checks: {
+    lint: "pass" | "fail" | "skip";
+    typecheck: "pass" | "fail" | "skip";
+    test: "pass" | "fail" | "skip";
+    build: "pass" | "fail" | "skip";
+  };
+  stages: Array<{
+    stage: "lint" | "typecheck" | "test" | "build";
+    command: string;
+    exitCode: number | null;
+    stdout: string;
+    stderr: string;
+    status: "pass" | "fail" | "skip" | "blocked";
+    policy: {
+      decision: "allow" | "deny" | "require_approval";
+      reason: string;
+    };
+    highRisk: {
+      requiresApproval: boolean;
+      categories: string[];
+      reasons: string[];
+      prompt: string | null;
+    } | null;
+    parsedTest: TerminalResult["parsedTest"];
+  }>;
+  blockedStage: "lint" | "typecheck" | "test" | "build" | null;
   artifactPath: string | null;
 };
 
@@ -136,6 +183,10 @@ const api = {
     ipcRenderer.invoke("terminal:run", root, command),
   runApprovedCommand: (root: string, command: string): Promise<TerminalResult> =>
     ipcRenderer.invoke("terminal:run-approved", root, command),
+  runPipeline: (
+    root: string,
+    commands?: Partial<Record<"lint" | "typecheck" | "test" | "build", string>>
+  ): Promise<PipelineResult> => ipcRenderer.invoke("terminal:run-pipeline", root, commands),
   replayTerminal: (limit: number): Promise<Array<{ runId: string; command: string; status: string; output: string }>> =>
     ipcRenderer.invoke("terminal:replay", limit),
   runMultiAgentTask: (

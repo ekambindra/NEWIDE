@@ -60,6 +60,14 @@ export type MultiAgentSummary = {
   agentRuns: Array<RunSummary & { agentId: string; focus: string }>;
 };
 
+type ApprovalPrompt = {
+  id: string;
+  category: string;
+  target: string;
+  reason: string;
+  approved: boolean;
+};
+
 function nowIso(): string {
   return new Date().toISOString();
 }
@@ -71,6 +79,121 @@ async function writeJson(filePath: string, value: unknown): Promise<void> {
 
 function hashObject(value: unknown): string {
   return createHash("sha256").update(JSON.stringify(value)).digest("hex");
+}
+
+function normalizeApprovalPrompts(requirements?: Record<string, unknown>): ApprovalPrompt[] {
+  const raw = requirements?.highRiskActions;
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+
+  const prompts: ApprovalPrompt[] = [];
+  for (const item of raw) {
+    if (typeof item === "string") {
+      const target = item.trim();
+      if (!target) continue;
+      prompts.push({
+        id: randomUUID(),
+        category: "custom",
+        target,
+        reason: "high-risk action requires explicit approval",
+        approved: false
+      });
+      continue;
+    }
+
+    if (!item || typeof item !== "object") {
+      continue;
+    }
+    const action = item as {
+      category?: unknown;
+      target?: unknown;
+      reason?: unknown;
+      approved?: unknown;
+    };
+    const target = typeof action.target === "string" ? action.target.trim() : "";
+    if (!target) {
+      continue;
+    }
+    prompts.push({
+      id: randomUUID(),
+      category:
+        typeof action.category === "string" && action.category.trim()
+          ? action.category.trim()
+          : "custom",
+      target,
+      reason:
+        typeof action.reason === "string" && action.reason.trim()
+          ? action.reason.trim()
+          : "high-risk action requires explicit approval",
+      approved: action.approved === true
+    });
+  }
+
+  return prompts;
+}
+
+function approvalStats(prompts: ApprovalPrompt[]): {
+  required: number;
+  granted: number;
+  pending: number;
+} {
+  const required = prompts.length;
+  const granted = prompts.filter((prompt) => prompt.approved).length;
+  return {
+    required,
+    granted,
+    pending: Math.max(0, required - granted)
+  };
+}
+
+async function writeFinalizationArtifacts(input: {
+  runRoot: string;
+  runId: string;
+  status: "success" | "failed" | "blocked";
+  summary: string;
+  risks: string[];
+  rollback: string;
+  checks: StepResult["checks"];
+  steps: number;
+  toolCalls: number;
+  attempts: number;
+  approvals: ApprovalPrompt[];
+}): Promise<void> {
+  const generatedAt = nowIso();
+  await writeJson(join(input.runRoot, "finalization.json"), {
+    run_id: input.runId,
+    status: input.status,
+    summary: input.summary,
+    risks: input.risks,
+    rollback: input.rollback,
+    generated_at: generatedAt
+  });
+
+  const approvals = approvalStats(input.approvals);
+  await writeJson(join(input.runRoot, "finalization_bundle.json"), {
+    run_id: input.runId,
+    status: input.status,
+    summary: input.summary,
+    risks: input.risks,
+    rollback: input.rollback,
+    approvals: {
+      ...approvals,
+      prompts: input.approvals.map((prompt) => ({
+        id: prompt.id,
+        category: prompt.category,
+        target: prompt.target,
+        reason: prompt.reason
+      }))
+    },
+    evidence: {
+      steps: input.steps,
+      tool_calls: input.toolCalls,
+      attempts: input.attempts,
+      checks: input.checks
+    },
+    generated_at: generatedAt
+  });
 }
 
 export class AgentRuntime {
@@ -126,6 +249,43 @@ export class AgentRuntime {
     };
 
     await writeJson(join(stepRoot, "plan.json"), plan);
+    const approvalPrompts = normalizeApprovalPrompts(task.requirements);
+    if (approvalPrompts.length > 0) {
+      await writeJson(join(stepRoot, "approval_prompts.json"), approvalPrompts);
+    }
+
+    const pendingApprovals = approvalPrompts.filter((prompt) => !prompt.approved);
+    if (pendingApprovals.length > 0) {
+      const blocked: StepResult = {
+        status: "blocked",
+        checks: { lint: "skip", typecheck: "skip", test: "skip", build: "skip" },
+        failures: pendingApprovals.map(
+          (prompt) => `[${prompt.category}] ${prompt.target}: ${prompt.reason}`
+        ),
+        metrics: {
+          required_approvals: pendingApprovals.length
+        },
+        next_action: "approval-required"
+      };
+      await writeJson(join(stepRoot, "results.json"), blocked);
+      await writeFile(join(stepRoot, "patch.diff"), "", "utf8");
+      await writeFile(join(stepRoot, "tool_calls.jsonl"), "", "utf8");
+      await writeFinalizationArtifacts({
+        runRoot,
+        runId,
+        status: "blocked",
+        summary: "run blocked pending high-risk approvals",
+        risks: pendingApprovals.map((prompt) => prompt.reason),
+        rollback: "no edits applied",
+        checks: blocked.checks,
+        steps: 1,
+        toolCalls: 0,
+        attempts: 0,
+        approvals: approvalPrompts
+      });
+      await this.finalizeManifest(runRoot, "blocked");
+      return { runId, status: "blocked", steps: 1 };
+    }
 
     const tool = this.tools.get("echo");
     if (!tool) {
@@ -139,13 +299,18 @@ export class AgentRuntime {
       await writeJson(join(stepRoot, "results.json"), failed);
       await writeFile(join(stepRoot, "patch.diff"), "", "utf8");
       await writeFile(join(stepRoot, "tool_calls.jsonl"), "", "utf8");
-      await writeJson(join(runRoot, "finalization.json"), {
-        run_id: runId,
+      await writeFinalizationArtifacts({
+        runRoot,
+        runId,
         status: "failed",
         summary: "run failed before execution",
         risks: ["missing required tool"],
         rollback: "no rollback required",
-        generated_at: nowIso()
+        checks: failed.checks,
+        steps: 1,
+        toolCalls: 0,
+        attempts: 0,
+        approvals: approvalPrompts
       });
       await this.finalizeManifest(runRoot, "failed");
       return { runId, status: "failed", steps: 1 };
@@ -153,7 +318,7 @@ export class AgentRuntime {
 
     const command = "node echo";
     const gate = evaluateCommand(this.policy, command);
-    if (gate.decision === "deny") {
+    if (gate.decision !== "allow") {
       const blocked: StepResult = {
         status: "blocked",
         checks: { lint: "skip", typecheck: "skip", test: "skip", build: "skip" },
@@ -164,13 +329,18 @@ export class AgentRuntime {
       await writeJson(join(stepRoot, "results.json"), blocked);
       await writeFile(join(stepRoot, "patch.diff"), "", "utf8");
       await writeFile(join(stepRoot, "tool_calls.jsonl"), "", "utf8");
-      await writeJson(join(runRoot, "finalization.json"), {
-        run_id: runId,
+      await writeFinalizationArtifacts({
+        runRoot,
+        runId,
         status: "blocked",
         summary: "run blocked by policy",
         risks: [gate.reason],
         rollback: "no edits applied",
-        generated_at: nowIso()
+        checks: blocked.checks,
+        steps: 1,
+        toolCalls: 0,
+        attempts: 0,
+        approvals: approvalPrompts
       });
       await this.finalizeManifest(runRoot, "blocked");
       return { runId, status: "blocked", steps: 1 };
@@ -262,13 +432,18 @@ export class AgentRuntime {
       previous_hash: null
     });
 
-    await writeJson(join(runRoot, "finalization.json"), {
-      run_id: runId,
+    await writeFinalizationArtifacts({
+      runRoot,
+      runId,
       status: succeeded ? "success" : "failed",
       summary: succeeded ? "task completed successfully" : "task failed after bounded retries",
       risks: succeeded ? [] : [lastFailure ?? "unknown failure"],
       rollback: "restore from previous checkpoint or revert patch.diff",
-      generated_at: nowIso()
+      checks: result.checks,
+      steps: 1,
+      toolCalls: toolCalls.length,
+      attempts: attempt,
+      approvals: approvalPrompts
     });
 
     await this.finalizeManifest(runRoot, succeeded ? "success" : "failed");
@@ -353,6 +528,29 @@ export class AgentRuntime {
       overall_status: summary.overallStatus,
       successful_agents: runs.filter((run) => run.status === "success").length,
       failed_agents: runs.filter((run) => run.status !== "success").length,
+      generated_at: nowIso()
+    });
+    await writeJson(join(coordinatorRoot, "finalization_bundle.json"), {
+      coordinator_run_id: coordinatorRunId,
+      overall_status: summary.overallStatus,
+      summary: summary.overallStatus === "success"
+        ? "all agents completed successfully"
+        : "one or more agents failed",
+      risks: summary.overallStatus === "success"
+        ? []
+        : ["agent subtask failure detected"],
+      rollback: "revert impacted agent run checkpoints",
+      approvals: {
+        required: 0,
+        granted: 0,
+        pending: 0,
+        prompts: []
+      },
+      evidence: {
+        agents: runs.length,
+        successful_agents: runs.filter((run) => run.status === "success").length,
+        failed_agents: runs.filter((run) => run.status !== "success").length
+      },
       generated_at: nowIso()
     });
 

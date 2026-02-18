@@ -35,6 +35,10 @@ describe("agent runtime", () => {
     const finalization = await readFile(finalizationPath, "utf8");
     expect(finalization.includes("task completed successfully")).toBe(true);
 
+    const bundlePath = join(root, summary.runId, "finalization_bundle.json");
+    const bundle = await readFile(bundlePath, "utf8");
+    expect(bundle.includes("\"tool_calls\"")).toBe(true);
+
     const runs = await runtime.listRuns();
     expect(runs.some((run) => run.runId === summary.runId)).toBe(true);
 
@@ -43,6 +47,42 @@ describe("agent runtime", () => {
 
     const rollback = await runtime.rollbackRun(summary.runId, "test rollback");
     expect(rollback.ok).toBe(true);
+  });
+
+  it("blocks task when high-risk approvals are missing", async () => {
+    const root = await mkdtemp(join(tmpdir(), "runtime-approval-"));
+    const runtime = new AgentRuntime({ checkpointRoot: root, model: "local-test" });
+
+    runtime.registerTool({
+      name: "echo",
+      run: async () => ({ exitCode: 0 })
+    });
+
+    const summary = await runtime.runTask({
+      taskType: "task",
+      goal: "apply infrastructure change",
+      acceptanceCriteria: ["approval captured"],
+      requirements: {
+        highRiskActions: [
+          {
+            category: "infra",
+            target: "infra/prod.tf",
+            reason: "production infrastructure change",
+            approved: false
+          }
+        ]
+      }
+    });
+
+    expect(summary.status).toBe("blocked");
+
+    const promptsPath = join(root, summary.runId, "step-1", "approval_prompts.json");
+    const prompts = await readFile(promptsPath, "utf8");
+    expect(prompts.includes("infra/prod.tf")).toBe(true);
+
+    const bundlePath = join(root, summary.runId, "finalization_bundle.json");
+    const bundle = await readFile(bundlePath, "utf8");
+    expect(bundle.includes("\"pending\"")).toBe(true);
   });
 
   it("runs multiple agents concurrently", async () => {

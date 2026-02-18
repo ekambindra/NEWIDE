@@ -131,6 +131,50 @@ type OwnershipConflictReport = {
   }>;
 };
 
+type ParsedTestSummary = {
+  framework: "vitest" | "jest" | "pytest" | "junit" | "unknown";
+  total: number;
+  passed: number;
+  failed: number;
+  skipped: number;
+  durationMs: number | null;
+  rawSignal: string;
+};
+
+type PipelineStageResult = {
+  stage: "lint" | "typecheck" | "test" | "build";
+  command: string;
+  exitCode: number | null;
+  stdout: string;
+  stderr: string;
+  status: "pass" | "fail" | "skip" | "blocked";
+  policy: {
+    decision: "allow" | "deny" | "require_approval";
+    reason: string;
+  };
+  highRisk: {
+    requiresApproval: boolean;
+    categories: string[];
+    reasons: string[];
+    prompt: string | null;
+  } | null;
+  parsedTest: ParsedTestSummary | null;
+};
+
+type PipelineResult = {
+  id: string;
+  status: "success" | "failed" | "blocked";
+  checks: {
+    lint: "pass" | "fail" | "skip";
+    typecheck: "pass" | "fail" | "skip";
+    test: "pass" | "fail" | "skip";
+    build: "pass" | "fail" | "skip";
+  };
+  stages: PipelineStageResult[];
+  blockedStage: "lint" | "typecheck" | "test" | "build" | null;
+  artifactPath: string | null;
+};
+
 const panelTabs: PanelTab[] = ["agent", "plan", "diff", "checkpoints"];
 const bottomTabs: BottomTab[] = ["terminal", "tests", "logs"];
 const leftTabs: LeftTab[] = ["files", "search"];
@@ -328,6 +372,12 @@ export function App() {
   const [terminalInput, setTerminalInput] = useState("npm run test");
   const [terminalOutput, setTerminalOutput] = useState<string[]>([]);
   const [testOutput, setTestOutput] = useState<string[]>([]);
+  const [testSummaries, setTestSummaries] = useState<ParsedTestSummary[]>([]);
+  const [pipelineResult, setPipelineResult] = useState<PipelineResult | null>(null);
+  const [pipelineLintCommand, setPipelineLintCommand] = useState("npm run lint");
+  const [pipelineTypecheckCommand, setPipelineTypecheckCommand] = useState("npm run typecheck");
+  const [pipelineTestCommand, setPipelineTestCommand] = useState("npm run test");
+  const [pipelineBuildCommand, setPipelineBuildCommand] = useState("npm run build");
   const [logs, setLogs] = useState<string[]>([]);
   const [checkpoints, setCheckpoints] = useState<Array<{ runId: string; path: string }>>([]);
   const [selectedCheckpoint, setSelectedCheckpoint] = useState<string | null>(null);
@@ -340,6 +390,7 @@ export function App() {
   const [terminalReplay, setTerminalReplay] = useState<Array<{ runId: string; command: string; status: string; output: string }>>([]);
   const [auditEvents, setAuditEvents] = useState<AuditEvent[]>([]);
   const [pendingApprovalCommand, setPendingApprovalCommand] = useState<string | null>(null);
+  const [pendingApprovalReason, setPendingApprovalReason] = useState<string | null>(null);
   const [teamMemory, setTeamMemory] = useState<TeamMemoryEntry[]>([]);
   const [memorySearchResults, setMemorySearchResults] = useState<ScoredTeamMemoryEntry[]>([]);
   const [memorySearchQuery, setMemorySearchQuery] = useState("");
@@ -607,15 +658,24 @@ export function App() {
       return;
     }
     const result = await window.ide.runCommand(workspaceRoot, terminalInput.trim());
+    const riskLabel = result.highRisk?.categories.length ? ` risk=${result.highRisk.categories.join(",")}` : "";
     setTerminalOutput((prev) => [`$ ${result.command}`, result.stdout, result.stderr, ...prev].slice(0, 400));
-    setLogs((prev) => [`[terminal] ${result.policy.decision} ${result.command}`, ...prev]);
-    if (/test/.test(result.command)) {
+    setLogs((prev) => [`[terminal] ${result.policy.decision} ${result.command}${riskLabel}`, ...prev]);
+    if (result.parsedTest) {
+      setTestSummaries((prev) => [result.parsedTest as ParsedTestSummary, ...prev].slice(0, 80));
+      setTestOutput((prev) => [`${result.stdout}${result.stderr}`.trim(), ...prev].slice(0, 100));
+      setBottomTab("tests");
+    } else if (/test/.test(result.command)) {
       setTestOutput((prev) => [`${result.stdout}${result.stderr}`.trim(), ...prev].slice(0, 100));
       setBottomTab("tests");
     }
     if (result.policy.decision === "require_approval") {
       setPendingApprovalCommand(result.command);
+      setPendingApprovalReason(result.highRisk?.prompt ?? result.policy.reason);
       setPanelTab("plan");
+    }
+    if (result.policy.decision !== "require_approval") {
+      setPendingApprovalReason(null);
     }
     if (result.artifactPath) {
       await refreshCheckpoints();
@@ -631,6 +691,62 @@ export function App() {
     setTerminalOutput((prev) => [`$ [approved] ${result.command}`, result.stdout, result.stderr, ...prev].slice(0, 400));
     setLogs((prev) => [`[terminal-approved] ${result.command}`, ...prev]);
     setPendingApprovalCommand(null);
+    setPendingApprovalReason(null);
+    if (result.parsedTest) {
+      setTestSummaries((prev) => [result.parsedTest as ParsedTestSummary, ...prev].slice(0, 80));
+      setTestOutput((prev) => [`${result.stdout}${result.stderr}`.trim(), ...prev].slice(0, 100));
+      setBottomTab("tests");
+    }
+    if (result.artifactPath) {
+      await refreshCheckpoints();
+    }
+    await refreshAudit();
+  };
+
+  const runPipeline = async () => {
+    if (!workspaceRoot) {
+      return;
+    }
+    const result = await window.ide.runPipeline(workspaceRoot, {
+      lint: pipelineLintCommand,
+      typecheck: pipelineTypecheckCommand,
+      test: pipelineTestCommand,
+      build: pipelineBuildCommand
+    });
+    setPipelineResult(result as PipelineResult);
+    const stageLog = result.stages
+      .map((stage) => `$ [${stage.stage}] ${stage.command}\n${stage.stdout}\n${stage.stderr}`)
+      .join("\n");
+    setTerminalOutput((prev) => [stageLog.trim(), ...prev].slice(0, 400));
+    setLogs((prev) => [
+      `[pipeline] ${result.status} lint=${result.checks.lint} typecheck=${result.checks.typecheck} test=${result.checks.test} build=${result.checks.build}`,
+      ...prev
+    ]);
+
+    const parsed = result.stages
+      .map((stage) => stage.parsedTest)
+      .filter((summary): summary is ParsedTestSummary => summary !== null);
+    if (parsed.length > 0) {
+      setTestSummaries((prev) => [...parsed, ...prev].slice(0, 80));
+      setTestOutput((prev) => [
+        ...parsed.map(
+          (summary) =>
+            `[${summary.framework}] total=${summary.total} passed=${summary.passed} failed=${summary.failed} skipped=${summary.skipped}`
+        ),
+        ...prev
+      ].slice(0, 100));
+      setBottomTab("tests");
+    }
+
+    if (result.blockedStage) {
+      const blocked = result.stages.find((stage) => stage.stage === result.blockedStage);
+      setPendingApprovalCommand(blocked?.command ?? null);
+      setPendingApprovalReason(blocked?.highRisk?.prompt ?? blocked?.policy.reason ?? "pipeline blocked");
+      setPanelTab("plan");
+    } else {
+      setPendingApprovalReason(null);
+    }
+
     if (result.artifactPath) {
       await refreshCheckpoints();
     }
@@ -1182,9 +1298,17 @@ export function App() {
                 <div className="checkpoint-card">
                   <strong>Pending Command Approval</strong>
                   <code>{pendingApprovalCommand}</code>
+                  {pendingApprovalReason ? <span>{pendingApprovalReason}</span> : null}
                   <div className="inline-search">
                     <button onClick={() => { void runApprovedCommand(); }}>Approve + Run</button>
-                    <button onClick={() => setPendingApprovalCommand(null)}>Dismiss</button>
+                    <button
+                      onClick={() => {
+                        setPendingApprovalCommand(null);
+                        setPendingApprovalReason(null);
+                      }}
+                    >
+                      Dismiss
+                    </button>
                   </div>
                 </div>
               ) : (
@@ -1560,14 +1684,55 @@ export function App() {
               <div className="inline-search">
                 <input value={terminalInput} onChange={(event) => setTerminalInput(event.target.value)} placeholder="Run command" />
                 <button onClick={runCommand}>Run</button>
+                <button onClick={() => { void runPipeline(); }}>Run Pipeline</button>
                 <button onClick={() => { void loadTerminalReplay(); }}>Replay</button>
+              </div>
+              <div className="checkpoint-card">
+                <strong>Pipeline Commands</strong>
+                <input
+                  value={pipelineLintCommand}
+                  onChange={(event) => setPipelineLintCommand(event.target.value)}
+                  placeholder="Lint command"
+                />
+                <input
+                  value={pipelineTypecheckCommand}
+                  onChange={(event) => setPipelineTypecheckCommand(event.target.value)}
+                  placeholder="Typecheck command"
+                />
+                <input
+                  value={pipelineTestCommand}
+                  onChange={(event) => setPipelineTestCommand(event.target.value)}
+                  placeholder="Test command"
+                />
+                <input
+                  value={pipelineBuildCommand}
+                  onChange={(event) => setPipelineBuildCommand(event.target.value)}
+                  placeholder="Build command"
+                />
+                {pipelineResult ? (
+                  <code>
+                    last: {pipelineResult.status} | lint={pipelineResult.checks.lint} typecheck={pipelineResult.checks.typecheck} test={pipelineResult.checks.test} build={pipelineResult.checks.build}
+                  </code>
+                ) : null}
               </div>
               <pre>{terminalOutput.join("\n")}</pre>
             </div>
           ) : null}
           {bottomTab === "tests" ? (
             <div className="terminal-pane">
-              <button onClick={() => { setTerminalInput("npm test"); void runCommand(); }}>Rerun Failed Tests</button>
+              <div className="inline-search">
+                <button onClick={() => { setTerminalInput("npm test"); void runCommand(); }}>Rerun Failed Tests</button>
+                <button onClick={() => { void runPipeline(); }}>Run Full Pipeline</button>
+              </div>
+              {testSummaries.map((summary, index) => (
+                <div key={`${summary.framework}-${summary.total}-${index}`} className="checkpoint-card">
+                  <strong>{summary.framework}</strong>
+                  <code>
+                    total={summary.total} passed={summary.passed} failed={summary.failed} skipped={summary.skipped}
+                  </code>
+                  <code>durationMs={summary.durationMs ?? 0}</code>
+                </div>
+              ))}
               <pre>{testOutput.join("\n\n") || "No test output yet."}</pre>
             </div>
           ) : null}
