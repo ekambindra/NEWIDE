@@ -94,7 +94,7 @@
 85. Added renderer workspace/session restore persistence for open workspace, tabs, split/editor focus state, panel tabs, autosave mode, and command/search context with stale-workspace safety checks (UI-014).
 86. Added crash-safe renderer error boundary with explicit reload/reset recovery actions and isolated fallback UI that preserves project files (UI-015).
 87. Added accessibility baseline hardening: skip-link navigation, tablist semantics, live-region status announcements, labeled critical form controls, dialog modal semantics, and focus-visible styling (UI-016).
-88. Fixed GitHub Pages deployment workflow by enabling automatic Pages bootstrap in `actions/configure-pages` (`enablement: true`), resolving `docs-site` CI failure on repositories without pre-enabled Pages.
+88. Fixed GitHub Pages deployment workflow by adding a Pages availability pre-check and conditional deploy steps, preventing `docs-site` CI failures when Pages is not enabled yet.
 89. Performed repository-wide markdown internal-link validation and confirmed no broken local documentation links.
 90. Added M10/M11 governance artifacts for beta acceptance and GA signoff to close launch-readiness documentation gaps.
 

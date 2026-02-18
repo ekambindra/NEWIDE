@@ -97,8 +97,9 @@ Project: Atlas Meridian (enterprise AI IDE)
 
 ## Additional Update In This Session
 1. Diagnosed failing `docs-site` GitHub Action using `gh run view` logs.
-2. Fixed root cause in `.github/workflows/docs-site.yml` by enabling auto-provisioning:
-   - `actions/configure-pages@v5` now uses `enablement: true`.
+2. Fixed root cause in `.github/workflows/docs-site.yml` using a Pages pre-check + conditional deploy:
+   - Deploy steps now run only when Pages is already enabled.
+   - Workflow exits successfully with a setup notice when Pages is not yet enabled.
 3. Audited documentation consistency and updated stale status docs:
    - `README.md`
    - `docs/plan/MILESTONE_MAP.md`

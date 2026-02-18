@@ -23,14 +23,35 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Configure Pages
-        uses: actions/configure-pages@v5
+      - name: Check Pages availability
+        id: pages
+        uses: actions/github-script@v7
         with:
-          enablement: true
+          script: |
+            try {
+              await github.rest.repos.getPagesSite({
+                owner: context.repo.owner,
+                repo: context.repo.repo
+              });
+              core.setOutput("enabled", "true");
+            } catch (error) {
+              core.warning(`Pages is not enabled yet (${error.status ?? "unknown"}). Skipping deploy.`);
+              core.setOutput("enabled", "false");
+            }
+      - name: Configure Pages
+        if: steps.pages.outputs.enabled == 'true'
+        uses: actions/configure-pages@v5
       - name: Upload docs site artifact
+        if: steps.pages.outputs.enabled == 'true'
         uses: actions/upload-pages-artifact@v3
         with:
           path: public-docs
       - name: Deploy to GitHub Pages
+        if: steps.pages.outputs.enabled == 'true'
         id: deployment
         uses: actions/deploy-pages@v4
+      - name: Pages not enabled notice
+        if: steps.pages.outputs.enabled != 'true'
+        run: |
+          echo "GitHub Pages is not enabled for this repository."
+          echo "Enable it once in Settings -> Pages (Build and deployment: GitHub Actions)."

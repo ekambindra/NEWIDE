@@ -33,7 +33,7 @@
 - Implemented release workflows for signed desktop artifacts
 - Implemented benchmark regression gate workflow: `.github/workflows/benchmark-gate.yml`
 - Implemented docs site deploy workflow: `.github/workflows/docs-site.yml`
-  - Uses `actions/configure-pages@v5` with `enablement: true` to bootstrap GitHub Pages automatically.
+  - Performs a Pages availability pre-check and skips deploy (without failing CI) when Pages is not enabled yet.
 
 ## Telemetry and Privacy
 
