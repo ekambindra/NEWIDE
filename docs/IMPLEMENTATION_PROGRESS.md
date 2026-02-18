@@ -2,8 +2,8 @@
 
 ## Current Completion
 
-- Completed features: 103/170
-- Completion percentage: 60.6%
+- Completed features: 105/170
+- Completion percentage: 61.8%
 
 ## Latest Implemented Increments
 
@@ -27,6 +27,8 @@
 18. Team memory search with scoring and tag filtering for faster retrieval context.
 19. Semantic reviewer upgrade using TypeScript AST checks plus issue deduping/ranking.
 20. Ownership conflict detection for concurrent multi-agent assignments.
+21. Diff churn statistics panel for changed lines/chunks and decision state (DIFF-011).
+22. Sensitive-file change highlighting in diff approval workflow (DIFF-009).
 
 ## Verification Commands
 

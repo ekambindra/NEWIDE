@@ -45,6 +45,16 @@ type DiffQueueItem = {
   timestamp: string;
 };
 
+type DiffChurnStats = {
+  additions: number;
+  deletions: number;
+  changedLines: number;
+  changedChunks: number;
+  pendingChunks: number;
+  acceptedChunks: number;
+  rejectedChunks: number;
+};
+
 type AuditEvent = {
   event_id: string;
   ts: string;
@@ -223,6 +233,79 @@ function rejectChunkContent(currentContent: string, originalContent: string, chu
   return current.join("\n");
 }
 
+function computeDiffChurnStats(chunks: DiffChunk[]): DiffChurnStats {
+  const stats: DiffChurnStats = {
+    additions: 0,
+    deletions: 0,
+    changedLines: 0,
+    changedChunks: chunks.length,
+    pendingChunks: 0,
+    acceptedChunks: 0,
+    rejectedChunks: 0
+  };
+
+  for (const chunk of chunks) {
+    if (chunk.status === "accepted") {
+      stats.acceptedChunks += 1;
+    } else if (chunk.status === "rejected") {
+      stats.rejectedChunks += 1;
+    } else {
+      stats.pendingChunks += 1;
+    }
+
+    const max = Math.max(chunk.original.length, chunk.current.length);
+    for (let i = 0; i < max; i += 1) {
+      const before = chunk.original[i];
+      const after = chunk.current[i];
+      if (before !== after) {
+        stats.changedLines += 1;
+        if (before !== undefined) {
+          stats.deletions += 1;
+        }
+        if (after !== undefined) {
+          stats.additions += 1;
+        }
+      }
+    }
+  }
+
+  return stats;
+}
+
+function detectSensitivePathSignals(path: string): string[] {
+  const normalized = path.toLowerCase();
+  const signals: string[] = [];
+
+  const includesSegment = (segment: string): boolean =>
+    normalized.includes(`/${segment}/`) ||
+    normalized.startsWith(`${segment}/`) ||
+    normalized.endsWith(`/${segment}`);
+
+  if (includesSegment("infra") || includesSegment("infrastructure") || normalized.includes("terraform")) {
+    signals.push("infra");
+  }
+  if (
+    includesSegment("security") ||
+    includesSegment("auth") ||
+    normalized.includes("/iam/") ||
+    normalized.endsWith("/iam.ts")
+  ) {
+    signals.push("security/auth");
+  }
+  if (
+    normalized.includes(".github/workflows") ||
+    normalized.endsWith("dockerfile") ||
+    normalized.endsWith("docker-compose.yml")
+  ) {
+    signals.push("deployment");
+  }
+  if (normalized.endsWith(".env") || normalized.includes("secrets")) {
+    signals.push("secret-adjacent");
+  }
+
+  return signals;
+}
+
 class AppErrorBoundary extends Error {
   constructor(public readonly original: unknown) {
     super("App crashed");
@@ -318,6 +401,11 @@ export function App() {
     }
     return computeDiffChunks(active.originalContent, active.content, chunkDecisions[active.path]);
   }, [active, chunkDecisions]);
+  const diffChurn = useMemo(() => computeDiffChurnStats(diffChunks), [diffChunks]);
+  const sensitivePathSignals = useMemo(
+    () => (active ? detectSensitivePathSignals(active.path) : []),
+    [active]
+  );
 
   const refreshTree = async (root: string) => {
     const [nodes, statuses] = await Promise.all([window.ide.getTree(root), window.ide.gitStatus(root)]);
@@ -1352,6 +1440,19 @@ export function App() {
               {!active || active.binary ? <p className="empty">Open a text file to review diff chunks.</p> : null}
               {active && !active.binary ? (
                 <>
+                  <div className="checkpoint-card">
+                    <strong>Diff Churn Statistics</strong>
+                    <code>file: {active.path}</code>
+                    <code>chunks: {diffChurn.changedChunks} | pending: {diffChurn.pendingChunks} | accepted: {diffChurn.acceptedChunks} | rejected: {diffChurn.rejectedChunks}</code>
+                    <code>+{diffChurn.additions} / -{diffChurn.deletions} | changed lines: {diffChurn.changedLines}</code>
+                  </div>
+                  {sensitivePathSignals.length > 0 ? (
+                    <div className="checkpoint-card warning">
+                      <strong>Sensitive File Change</strong>
+                      <code>{active.path}</code>
+                      <span>Flags: {sensitivePathSignals.join(", ")}</span>
+                    </div>
+                  ) : null}
                   <div className="inline-search" style={{ marginBottom: 10 }}>
                     <input
                       value={chunkRationale}

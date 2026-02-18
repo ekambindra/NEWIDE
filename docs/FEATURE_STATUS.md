@@ -2,11 +2,11 @@
 
 This tracker reflects the current implementation state of the 170-item inventory.
 
-## Completed (103)
+## Completed (105)
 
 - UI-001..UI-013, UI-017..UI-020
 - WS-001..WS-010, WS-012..WS-014
-- DIFF-001..DIFF-004, DIFF-008, DIFF-010
+- DIFF-001..DIFF-004, DIFF-008..DIFF-011
 - TERM-002..TERM-005, TERM-008..TERM-010
 - AGENT-001..AGENT-018
 - IDX-001, IDX-003, IDX-004, IDX-006, IDX-008, IDX-010, IDX-013
@@ -34,5 +34,5 @@ This tracker reflects the current implementation state of the 170-item inventory
 
 ## Progress
 
-- Completed: `103/170`
-- Percent: `60.6%`
+- Completed: `105/170`
+- Percent: `61.8%`

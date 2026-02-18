@@ -305,6 +305,11 @@ textarea {
   background: rgba(20, 24, 31, 0.7);
 }
 
+.checkpoint-card.warning {
+  border-color: var(--warn);
+  background: rgba(45, 34, 14, 0.35);
+}
+
 .checkpoint-card pre {
   margin: 0;
   max-height: 220px;
