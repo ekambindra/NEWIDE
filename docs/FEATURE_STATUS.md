@@ -11,7 +11,7 @@ This tracker reflects the current implementation state of the 170-item inventory
 - AGENT-001..AGENT-018
 - IDX-001, IDX-003, IDX-004, IDX-006, IDX-008, IDX-010, IDX-013
 - AUTO-001, AUTO-003, AUTO-008..AUTO-014
-- TEAM-001..TEAM-010
+- TEAM-001..TEAM-010 (including memory search scoring, semantic reviewer checks, and ownership conflict reporting)
 - ENT-004..ENT-007, ENT-010, ENT-011, ENT-016
 - CLOUD-001..CLOUD-005
 - EVAL-001, EVAL-009

@@ -60,6 +60,8 @@ type TeamMemoryEntry = {
   tags: string[];
 };
 
+type ScoredTeamMemoryEntry = TeamMemoryEntry & { score: number };
+
 type DecisionLogEntry = {
   decision_id: string;
   ts: string;
@@ -100,6 +102,19 @@ type ReleaseNotesDraft = {
   markdown: string;
 };
 
+type OwnershipConflictReport = {
+  fileConflicts: Array<{
+    file: string;
+    agents: string[];
+    owners: string[];
+  }>;
+  ownerConflicts: Array<{
+    owner: string;
+    agents: string[];
+    files: string[];
+  }>;
+};
+
 const api = {
   openWorkspace: (): Promise<string | null> => ipcRenderer.invoke("workspace:open"),
   getTree: (root: string): Promise<TreeNode[]> => ipcRenderer.invoke("workspace:tree", root),
@@ -138,6 +153,11 @@ const api = {
   getRecentAudit: (limit: number): Promise<AuditEvent[]> => ipcRenderer.invoke("audit:recent", limit),
   exportAudit: (): Promise<{ path: string; count: number }> => ipcRenderer.invoke("audit:export"),
   listTeamMemory: (): Promise<TeamMemoryEntry[]> => ipcRenderer.invoke("team:memory:list"),
+  searchTeamMemory: (payload: {
+    query: string;
+    tags: string[];
+    limit?: number;
+  }): Promise<ScoredTeamMemoryEntry[]> => ipcRenderer.invoke("team:memory:search", payload),
   addTeamMemory: (payload: {
     title: string;
     content: string;
@@ -156,6 +176,11 @@ const api = {
     ipcRenderer.invoke("team:review:run", payload),
   mapOwnership: (payload: { root: string; files: string[] }): Promise<OwnershipMatch[]> =>
     ipcRenderer.invoke("team:ownership:map", payload),
+  detectOwnershipConflicts: (payload: {
+    root: string;
+    assignments: Array<{ agentId: string; files: string[] }>;
+  }): Promise<OwnershipConflictReport> =>
+    ipcRenderer.invoke("team:ownership:conflicts", payload),
   draftChangelog: (payload: { root: string; sinceRef?: string }): Promise<ChangelogDraft> =>
     ipcRenderer.invoke("team:changelog:draft", payload),
   draftReleaseNotes: (payload: {

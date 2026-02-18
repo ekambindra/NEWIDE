@@ -24,6 +24,9 @@
 15. Changelog draft generator from git history (TEAM-007).
 16. Release notes draft generator with highlights and categorized changes (TEAM-008).
 17. Product branding and package metadata renamed to Atlas Meridian.
+18. Team memory search with scoring and tag filtering for faster retrieval context.
+19. Semantic reviewer upgrade using TypeScript AST checks plus issue deduping/ranking.
+20. Ownership conflict detection for concurrent multi-agent assignments.
 
 ## Verification Commands
 

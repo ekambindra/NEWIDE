@@ -66,6 +66,8 @@ type TeamMemoryEntry = {
   tags: string[];
 };
 
+type ScoredTeamMemoryEntry = TeamMemoryEntry & { score: number };
+
 type DecisionLogEntry = {
   decision_id: string;
   ts: string;
@@ -104,6 +106,19 @@ type ReleaseNotesDraft = {
   version: string;
   generatedAt: string;
   markdown: string;
+};
+
+type OwnershipConflictReport = {
+  fileConflicts: Array<{
+    file: string;
+    agents: string[];
+    owners: string[];
+  }>;
+  ownerConflicts: Array<{
+    owner: string;
+    agents: string[];
+    files: string[];
+  }>;
 };
 
 const panelTabs: PanelTab[] = ["agent", "plan", "diff", "checkpoints"];
@@ -243,6 +258,9 @@ export function App() {
   const [auditEvents, setAuditEvents] = useState<AuditEvent[]>([]);
   const [pendingApprovalCommand, setPendingApprovalCommand] = useState<string | null>(null);
   const [teamMemory, setTeamMemory] = useState<TeamMemoryEntry[]>([]);
+  const [memorySearchResults, setMemorySearchResults] = useState<ScoredTeamMemoryEntry[]>([]);
+  const [memorySearchQuery, setMemorySearchQuery] = useState("");
+  const [memorySearchTags, setMemorySearchTags] = useState("");
   const [decisionLogs, setDecisionLogs] = useState<DecisionLogEntry[]>([]);
   const [reviewerFindings, setReviewerFindings] = useState<ReviewerFinding[]>([]);
   const [memoryTitle, setMemoryTitle] = useState("Decision context");
@@ -257,6 +275,10 @@ export function App() {
   const [reviewerFiles, setReviewerFiles] = useState("");
   const [ownershipFiles, setOwnershipFiles] = useState("");
   const [ownershipMap, setOwnershipMap] = useState<OwnershipMatch[]>([]);
+  const [ownershipAssignments, setOwnershipAssignments] = useState(
+    "agent-1: apps/desktop/src/renderer/App.tsx\nagent-2: apps/desktop/src/main/main.ts"
+  );
+  const [ownershipConflicts, setOwnershipConflicts] = useState<OwnershipConflictReport | null>(null);
   const [changelogSinceRef, setChangelogSinceRef] = useState("");
   const [changelogDraft, setChangelogDraft] = useState<ChangelogDraft | null>(null);
   const [releaseVersion, setReleaseVersion] = useState("v0.1.0");
@@ -329,6 +351,7 @@ export function App() {
       window.ide.listDecisionLogs()
     ]);
     setTeamMemory(memory);
+    setMemorySearchResults(memory.map((entry) => ({ ...entry, score: 1 })));
     setDecisionLogs(decisions);
   };
 
@@ -702,6 +725,19 @@ export function App() {
     setLogs((prev) => [`[team-memory] added ${memoryTitle}`, ...prev]);
   };
 
+  const searchMemoryEntries = async () => {
+    const results = await window.ide.searchTeamMemory({
+      query: memorySearchQuery,
+      tags: memorySearchTags
+        .split(",")
+        .map((tag) => tag.trim())
+        .filter(Boolean),
+      limit: 80
+    });
+    setMemorySearchResults(results);
+    setLogs((prev) => [`[team-memory] search results ${results.length}`, ...prev]);
+  };
+
   const createDecisionLog = async () => {
     if (!decisionTitle.trim() || !decisionContext.trim() || !decisionChosen.trim()) {
       return;
@@ -766,6 +802,52 @@ export function App() {
     setOwnershipMap(mapping);
     await refreshAudit();
     setLogs((prev) => [`[ownership] mapped ${mapping.length} files`, ...prev]);
+  };
+
+  const runOwnershipConflictDetection = async () => {
+    if (!workspaceRoot) {
+      return;
+    }
+    const assignments = ownershipAssignments
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((line) => {
+        const separator = line.indexOf(":");
+        if (separator === -1) {
+          return null;
+        }
+        const agentId = line.slice(0, separator).trim();
+        const files = line
+          .slice(separator + 1)
+          .split(",")
+          .map((item) => item.trim())
+          .filter(Boolean);
+        if (!agentId || files.length === 0) {
+          return null;
+        }
+        return { agentId, files };
+      })
+      .filter((entry): entry is { agentId: string; files: string[] } => entry !== null);
+
+    if (assignments.length === 0) {
+      setOwnershipConflicts({
+        fileConflicts: [],
+        ownerConflicts: []
+      });
+      return;
+    }
+
+    const report = await window.ide.detectOwnershipConflicts({
+      root: workspaceRoot,
+      assignments
+    });
+    setOwnershipConflicts(report);
+    await refreshAudit();
+    setLogs((prev) => [
+      `[ownership-conflicts] files=${report.fileConflicts.length} owners=${report.ownerConflicts.length}`,
+      ...prev
+    ]);
   };
 
   const runChangelogDraft = async () => {
@@ -1067,6 +1149,36 @@ export function App() {
               ))}
               {teamMemory.length === 0 ? <p className="empty">No memory entries yet.</p> : null}
 
+              <h4>Memory Search</h4>
+              <div className="checkpoint-card">
+                <input
+                  value={memorySearchQuery}
+                  onChange={(event) => setMemorySearchQuery(event.target.value)}
+                  placeholder="Search query"
+                />
+                <input
+                  value={memorySearchTags}
+                  onChange={(event) => setMemorySearchTags(event.target.value)}
+                  placeholder="Filter tags (comma-separated)"
+                />
+                <div className="inline-search">
+                  <button onClick={() => { void searchMemoryEntries(); }}>Search Memory</button>
+                  <button onClick={() => {
+                    setMemorySearchQuery("");
+                    setMemorySearchTags("");
+                    setMemorySearchResults(teamMemory.map((entry) => ({ ...entry, score: 1 })));
+                  }}>Clear Filters</button>
+                </div>
+              </div>
+              {memorySearchResults.map((entry) => (
+                <div key={`${entry.id}-${entry.score}`} className="checkpoint-card">
+                  <strong>{entry.title}</strong>
+                  <span>{entry.content}</span>
+                  <code>score: {entry.score} | tags: {entry.tags.join(", ")}</code>
+                </div>
+              ))}
+              {memorySearchResults.length === 0 ? <p className="empty">No memory search results.</p> : null}
+
               <h4>Decision Logs (ADR)</h4>
               <div className="checkpoint-card">
                 <input
@@ -1153,6 +1265,41 @@ export function App() {
                 </div>
               ))}
               {ownershipMap.length === 0 ? <p className="empty">No ownership mapping yet.</p> : null}
+
+              <h4>Ownership Conflict Detection</h4>
+              <div className="checkpoint-card">
+                <textarea
+                  value={ownershipAssignments}
+                  onChange={(event) => setOwnershipAssignments(event.target.value)}
+                  placeholder="agent-1: path/a.ts, path/b.ts"
+                  style={{ minHeight: 90 }}
+                />
+                <button onClick={() => { void runOwnershipConflictDetection(); }}>Detect Conflicts</button>
+              </div>
+              {ownershipConflicts ? (
+                <>
+                  <div className="checkpoint-card">
+                    <strong>File Conflicts</strong>
+                    <code>{ownershipConflicts.fileConflicts.length} files assigned to multiple agents</code>
+                    {ownershipConflicts.fileConflicts.slice(0, 20).map((conflict) => (
+                      <code key={`file-${conflict.file}`}>
+                        {conflict.file} | agents: {conflict.agents.join(", ")} | owners: {conflict.owners.join(", ") || "unassigned"}
+                      </code>
+                    ))}
+                  </div>
+                  <div className="checkpoint-card">
+                    <strong>Owner Conflicts</strong>
+                    <code>{ownershipConflicts.ownerConflicts.length} owners touched by multiple agents</code>
+                    {ownershipConflicts.ownerConflicts.slice(0, 20).map((conflict) => (
+                      <code key={`owner-${conflict.owner}`}>
+                        {conflict.owner} | agents: {conflict.agents.join(", ")} | files: {conflict.files.slice(0, 4).join(", ")}
+                      </code>
+                    ))}
+                  </div>
+                </>
+              ) : (
+                <p className="empty">No ownership conflict report yet.</p>
+              )}
 
               <h4>Changelog Draft</h4>
               <div className="checkpoint-card">

@@ -12,6 +12,7 @@ import { dirname, join, relative, resolve } from "node:path";
 import { app, BrowserWindow, dialog, ipcMain } from "electron";
 import ignore from "ignore";
 import { AgentRuntime } from "@ide/agent-runtime";
+import ts from "typescript";
 
 const execFileAsync = promisify(execFile);
 
@@ -92,6 +93,19 @@ type OwnershipMatch = {
   file: string;
   owners: string[];
   matchedPattern: string | null;
+};
+
+type OwnershipConflictReport = {
+  fileConflicts: Array<{
+    file: string;
+    agents: string[];
+    owners: string[];
+  }>;
+  ownerConflicts: Array<{
+    owner: string;
+    agents: string[];
+    files: string[];
+  }>;
 };
 
 type ChangelogDraft = {
@@ -270,6 +284,48 @@ async function listTeamMemory(): Promise<TeamMemoryEntry[]> {
   return entries.sort((a, b) => b.ts.localeCompare(a.ts));
 }
 
+async function searchTeamMemory(input: {
+  query: string;
+  tags: string[];
+  limit: number;
+}): Promise<Array<TeamMemoryEntry & { score: number }>> {
+  const entries = await listTeamMemory();
+  const queryTokens = input.query
+    .toLowerCase()
+    .split(/\s+/)
+    .map((token) => token.trim())
+    .filter(Boolean);
+  const tagFilters = input.tags.map((tag) => tag.toLowerCase().trim()).filter(Boolean);
+
+  const scored = entries
+    .map((entry) => {
+      const haystack = `${entry.title} ${entry.content}`.toLowerCase();
+      const tags = entry.tags.map((tag) => tag.toLowerCase());
+
+      let score = 0;
+      for (const token of queryTokens) {
+        if (entry.title.toLowerCase().includes(token)) {
+          score += 4;
+        } else if (haystack.includes(token)) {
+          score += 2;
+        }
+      }
+      for (const tag of tagFilters) {
+        if (tags.includes(tag)) {
+          score += 5;
+        }
+      }
+      if (queryTokens.length === 0 && tagFilters.length === 0) {
+        score = 1;
+      }
+      return { ...entry, score };
+    })
+    .filter((entry) => entry.score > 0)
+    .sort((a, b) => b.score - a.score || b.ts.localeCompare(a.ts));
+
+  return scored.slice(0, Math.max(1, Math.min(input.limit, 200)));
+}
+
 async function addTeamMemory(input: {
   title: string;
   content: string;
@@ -326,98 +382,175 @@ async function runReviewerMode(
   workspaceRoot: string,
   onlyFiles: string[] = []
 ): Promise<ReviewerFinding[]> {
-  const allowed = new Set(onlyFiles.filter(Boolean));
+  const isReviewableFile = (file: string): boolean => {
+    const normalized = normalizeRepoPath(file);
+    if (
+      normalized.includes("/node_modules/") ||
+      normalized.includes("/dist/") ||
+      normalized.includes("/coverage/") ||
+      normalized.includes("/checkpoints/")
+    ) {
+      return false;
+    }
+    return /\.(ts|tsx|js|jsx|mts|cts)$/i.test(normalized);
+  };
+
+  const explicitFiles = onlyFiles
+    .map((file) => normalizeRepoPath(file))
+    .filter(Boolean)
+    .filter(isReviewableFile);
+
+  let filesToReview: string[] = [];
+  if (explicitFiles.length > 0) {
+    filesToReview = explicitFiles;
+  } else {
+    try {
+      const { stdout } = await execFileAsync("rg", ["--files"], { cwd: workspaceRoot });
+      filesToReview = stdout
+        .split("\n")
+        .filter(Boolean)
+        .map((file) => normalizeRepoPath(file))
+        .filter(isReviewableFile)
+        .slice(0, 300);
+    } catch {
+      filesToReview = [];
+    }
+  }
+
   const findings: ReviewerFinding[] = [];
   const seen = new Set<string>();
 
-  const addMatches = async (args: {
-    pattern: string;
-    title: string;
-    body: string;
-    severity: ReviewerFinding["severity"];
-    confidence: number;
-  }): Promise<void> => {
-    try {
-      const { stdout } = await execFileAsync("rg", [
-        "--line-number",
-        "--no-heading",
-        args.pattern,
-        workspaceRoot
-      ]);
-      for (const line of stdout.split("\n").filter(Boolean)) {
-        const first = line.indexOf(":");
-        const second = line.indexOf(":", first + 1);
-        if (first === -1 || second === -1) {
-          continue;
-        }
-        const file = relative(workspaceRoot, line.slice(0, first));
-        if (allowed.size > 0 && !allowed.has(file)) {
-          continue;
-        }
-        const lineNum = Number(line.slice(first + 1, second));
-        const key = `${file}:${lineNum}:${args.title}`;
-        if (seen.has(key)) {
-          continue;
-        }
-        seen.add(key);
-        findings.push({
-          id: randomUUID(),
-          file,
-          line: lineNum,
-          title: args.title,
-          body: `${args.body} Matched snippet: ${line.slice(second + 1).trim().slice(0, 140)}`,
-          severity: args.severity,
-          confidence: args.confidence
-        });
-      }
-    } catch (error) {
-      const maybe = error as { code?: number };
-      if (maybe.code === 1) {
-        return;
-      }
-      throw error;
+  const addFinding = (finding: ReviewerFinding): void => {
+    const key = `${finding.file}:${finding.line}:${finding.title}`;
+    if (seen.has(key)) {
+      return;
     }
+    seen.add(key);
+    findings.push(finding);
   };
 
-  await addMatches({
-    pattern: "\\bTODO\\b|\\bFIXME\\b",
-    title: "Unresolved TODO/FIXME",
-    body: "Open TODO/FIXME markers can hide incomplete behavior and should be resolved or tracked.",
-    severity: "medium",
-    confidence: 0.78
-  });
-  await addMatches({
-    pattern: "\\bany\\b",
-    title: "Potential type-safety gap",
-    body: "Use of `any` may reduce static guarantees; consider narrowing with explicit types.",
-    severity: "medium",
-    confidence: 0.72
-  });
-  await addMatches({
-    pattern: "console\\.log\\(",
-    title: "Debug logging in code path",
-    body: "Console logging may leak sensitive context or create noisy runtime output.",
-    severity: "low",
-    confidence: 0.66
-  });
-  await addMatches({
-    pattern: "@ts-ignore|eslint-disable",
-    title: "Suppressed static checks",
-    body: "Suppression directives should include justification and be periodically removed.",
-    severity: "high",
-    confidence: 0.81
-  });
+  const severityRank: Record<ReviewerFinding["severity"], number> = {
+    high: 3,
+    medium: 2,
+    low: 1
+  };
+
+  for (const relFile of filesToReview) {
+    const absPath = resolve(workspaceRoot, relFile);
+    if (!existsSync(absPath)) {
+      continue;
+    }
+    const source = await fs.readFile(absPath, "utf8");
+    const lines = source.split("\n");
+    const indexToLine = (index: number): number => source.slice(0, Math.max(0, index)).split("\n").length;
+    const isTestFile = /(^|\/)(__tests__|tests?)\/|(\.|_)(test|spec)\.[tj]sx?$/i.test(relFile);
+
+    const suppressionPattern = /@ts-ignore|eslint-disable/g;
+    for (const match of source.matchAll(suppressionPattern)) {
+      addFinding({
+        id: randomUUID(),
+        file: relFile,
+        line: indexToLine(match.index ?? 0),
+        title: "Suppressed static checks",
+        body: "Suppression directives should include justification and an expiration cleanup plan.",
+        severity: "high",
+        confidence: 0.85
+      });
+    }
+
+    const todoPattern = /\bTODO\b|\bFIXME\b/g;
+    for (const match of source.matchAll(todoPattern)) {
+      const line = indexToLine(match.index ?? 0);
+      const snippet = lines[line - 1]?.trim() ?? "";
+      addFinding({
+        id: randomUUID(),
+        file: relFile,
+        line,
+        title: "Unresolved TODO/FIXME",
+        body: `TODO/FIXME markers usually indicate incomplete behavior. Snippet: ${snippet.slice(0, 140)}`,
+        severity: "medium",
+        confidence: 0.79
+      });
+    }
+
+    const kind =
+      relFile.endsWith(".tsx") ? ts.ScriptKind.TSX
+      : relFile.endsWith(".ts") ? ts.ScriptKind.TS
+      : relFile.endsWith(".jsx") ? ts.ScriptKind.JSX
+      : ts.ScriptKind.JS;
+    const sourceFile = ts.createSourceFile(absPath, source, ts.ScriptTarget.Latest, true, kind);
+
+    const walk = (node: ts.Node): void => {
+      if (node.kind === ts.SyntaxKind.AnyKeyword && !relFile.endsWith(".d.ts")) {
+        const line = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile)).line + 1;
+        const snippet = lines[line - 1]?.trim() ?? "";
+        addFinding({
+          id: randomUUID(),
+          file: relFile,
+          line,
+          title: "Potential type-safety gap",
+          body: `Use of \`any\` reduces static guarantees. Prefer explicit unions or narrowed interfaces. Snippet: ${snippet.slice(0, 140)}`,
+          severity: "medium",
+          confidence: 0.77
+        });
+      }
+
+      if (ts.isCallExpression(node)) {
+        const expression = node.expression;
+        if (
+          ts.isPropertyAccessExpression(expression) &&
+          expression.expression.getText(sourceFile) === "console" &&
+          ["log", "debug", "info"].includes(expression.name.getText(sourceFile))
+        ) {
+          if (!isTestFile) {
+            const line = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile)).line + 1;
+            const snippet = lines[line - 1]?.trim() ?? "";
+            addFinding({
+              id: randomUUID(),
+              file: relFile,
+              line,
+              title: "Debug logging in runtime path",
+              body: `Debug logging can leak context or create noisy production logs. Snippet: ${snippet.slice(0, 140)}`,
+              severity: "low",
+              confidence: 0.7
+            });
+          }
+        }
+
+        if (
+          ts.isIdentifier(expression) &&
+          (expression.text === "eval" || expression.text === "Function")
+        ) {
+          const line = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile)).line + 1;
+          addFinding({
+            id: randomUUID(),
+            file: relFile,
+            line,
+            title: "Dynamic code execution",
+            body: "Avoid `eval`/`Function` in application code; use explicit parsing/execution paths.",
+            severity: "high",
+            confidence: 0.86
+          });
+        }
+      }
+
+      ts.forEachChild(node, walk);
+    };
+
+    walk(sourceFile);
+  }
 
   return findings
     .sort((a, b) => {
-      const severityRank: Record<ReviewerFinding["severity"], number> = {
-        high: 3,
-        medium: 2,
-        low: 1
-      };
-      return severityRank[b.severity] - severityRank[a.severity] || a.file.localeCompare(b.file);
+      if (severityRank[b.severity] !== severityRank[a.severity]) {
+        return severityRank[b.severity] - severityRank[a.severity];
+      }
+      if (b.confidence !== a.confidence) {
+        return b.confidence - a.confidence;
+      }
+      return a.file.localeCompare(b.file) || a.line - b.line;
     })
-    .slice(0, 80);
+    .slice(0, 120);
 }
 
 function normalizeRepoPath(path: string): string {
@@ -500,6 +633,75 @@ async function mapOwnership(root: string, files: string[]): Promise<OwnershipMat
       matchedPattern
     };
   });
+}
+
+async function detectOwnershipConflicts(
+  root: string,
+  assignments: Array<{ agentId: string; files: string[] }>
+): Promise<OwnershipConflictReport> {
+  const fileAgentMap = new Map<string, Set<string>>();
+  const allFiles: string[] = [];
+  for (const assignment of assignments) {
+    for (const rawFile of assignment.files) {
+      const file = normalizeRepoPath(rawFile);
+      if (!file) continue;
+      allFiles.push(file);
+      if (!fileAgentMap.has(file)) {
+        fileAgentMap.set(file, new Set());
+      }
+      fileAgentMap.get(file)?.add(assignment.agentId);
+    }
+  }
+
+  const ownership = await mapOwnership(root, [...new Set(allFiles)]);
+  const ownershipByFile = new Map(ownership.map((entry) => [entry.file, entry]));
+
+  const fileConflicts: OwnershipConflictReport["fileConflicts"] = [];
+  for (const [file, agentsSet] of fileAgentMap.entries()) {
+    const agents = [...agentsSet];
+    if (agents.length > 1) {
+      fileConflicts.push({
+        file,
+        agents,
+        owners: ownershipByFile.get(file)?.owners ?? []
+      });
+    }
+  }
+
+  const ownerToAgents = new Map<string, Set<string>>();
+  const ownerToFiles = new Map<string, Set<string>>();
+  for (const assignment of assignments) {
+    for (const rawFile of assignment.files) {
+      const file = normalizeRepoPath(rawFile);
+      if (!file) continue;
+      const owners = ownershipByFile.get(file)?.owners ?? [];
+      for (const owner of owners) {
+        if (!ownerToAgents.has(owner)) {
+          ownerToAgents.set(owner, new Set());
+          ownerToFiles.set(owner, new Set());
+        }
+        ownerToAgents.get(owner)?.add(assignment.agentId);
+        ownerToFiles.get(owner)?.add(file);
+      }
+    }
+  }
+
+  const ownerConflicts: OwnershipConflictReport["ownerConflicts"] = [];
+  for (const [owner, agentsSet] of ownerToAgents.entries()) {
+    const agents = [...agentsSet];
+    if (agents.length > 1) {
+      ownerConflicts.push({
+        owner,
+        agents,
+        files: [...(ownerToFiles.get(owner) ?? new Set())]
+      });
+    }
+  }
+
+  return {
+    fileConflicts: fileConflicts.sort((a, b) => b.agents.length - a.agents.length),
+    ownerConflicts: ownerConflicts.sort((a, b) => b.agents.length - a.agents.length)
+  };
 }
 
 async function generateChangelogDraft(root: string, sinceRef?: string): Promise<ChangelogDraft> {
@@ -1318,6 +1520,20 @@ app.whenReady().then(async () => {
   });
 
   ipcMain.handle(
+    "team:memory:search",
+    async (
+      _event,
+      payload: { query: string; tags: string[]; limit?: number }
+    ) => {
+      return searchTeamMemory({
+        query: payload.query ?? "",
+        tags: payload.tags ?? [],
+        limit: payload.limit ?? 50
+      });
+    }
+  );
+
+  ipcMain.handle(
     "team:memory:add",
     async (
       _event,
@@ -1397,6 +1613,30 @@ app.whenReady().then(async () => {
         metadata: { files: payload.files.length, mapped: mapping.length }
       });
       return mapping;
+    }
+  );
+
+  ipcMain.handle(
+    "team:ownership:conflicts",
+    async (
+      _event,
+      payload: {
+        root: string;
+        assignments: Array<{ agentId: string; files: string[] }>;
+      }
+    ) => {
+      const report = await detectOwnershipConflicts(payload.root, payload.assignments);
+      await appendAuditEvent({
+        action: "team.ownership.conflicts",
+        target: payload.root,
+        decision: "executed",
+        reason: "ownership conflict report generated",
+        metadata: {
+          file_conflicts: report.fileConflicts.length,
+          owner_conflicts: report.ownerConflicts.length
+        }
+      });
+      return report;
     }
   );
 
