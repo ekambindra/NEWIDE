@@ -330,6 +330,27 @@ type GreenPipelineReport = {
   meetsTarget: boolean;
 };
 
+type ProjectBuilderResult = {
+  runId: string;
+  template: "node_microservices_postgres";
+  projectName: string;
+  projectRoot: string;
+  generatedAt: string;
+  generatedFiles: string[];
+  services: {
+    api: boolean;
+    worker: boolean;
+    postgres: boolean;
+  };
+  completeness: {
+    required: string[];
+    present: string[];
+    missing: string[];
+    completenessPercent: number;
+  };
+  checkpointPath: string;
+};
+
 const panelTabs: PanelTab[] = ["agent", "plan", "diff", "checkpoints"];
 const bottomTabs: BottomTab[] = ["terminal", "tests", "logs"];
 const leftTabs: LeftTab[] = ["files", "search"];
@@ -610,6 +631,10 @@ export function App() {
   const [indexRenameTo, setIndexRenameTo] = useState("executeTask");
   const [artifactReport, setArtifactReport] = useState<ArtifactCompletenessReport | null>(null);
   const [greenPipelineReport, setGreenPipelineReport] = useState<GreenPipelineReport | null>(null);
+  const [builderProjectName, setBuilderProjectName] = useState("Atlas Meridian Service Stack");
+  const [builderOutputDir, setBuilderOutputDir] = useState("generated-projects/atlas-meridian-service-stack");
+  const [builderResult, setBuilderResult] = useState<ProjectBuilderResult | null>(null);
+  const [builderRunning, setBuilderRunning] = useState(false);
   const [autoSaveMode, setAutoSaveMode] = useState<"manual" | "afterDelay" | "onBlur">("manual");
   const dragRef = useRef<null | "left" | "right" | "bottom">(null);
 
@@ -1308,6 +1333,33 @@ export function App() {
     ]);
   };
 
+  const runProjectBuilderMode = async () => {
+    if (!workspaceRoot || !builderProjectName.trim() || builderRunning) {
+      return;
+    }
+    setBuilderRunning(true);
+    try {
+      const result = await window.ide.runProjectBuilder({
+        workspaceRoot,
+        projectName: builderProjectName.trim(),
+        outputDir: builderOutputDir.trim() || undefined
+      });
+      setBuilderResult(result);
+      await refreshTree(workspaceRoot);
+      await refreshCheckpoints();
+      await refreshAudit();
+      setLogs((prev) => [
+        `[project-builder] ${result.runId} files=${result.generatedFiles.length} completeness=${result.completeness.completenessPercent}%`,
+        ...prev
+      ]);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "project builder failed";
+      setLogs((prev) => [`[project-builder] error: ${message}`, ...prev]);
+    } finally {
+      setBuilderRunning(false);
+    }
+  };
+
   const createMemoryEntry = async () => {
     if (!memoryTitle.trim() || !memoryContent.trim()) {
       return;
@@ -1672,6 +1724,40 @@ export function App() {
                   </select>
                   <button onClick={() => { void runMultiAgentMode(); }}>Launch</button>
                 </div>
+              </div>
+              <div className="checkpoint-card">
+                <strong>Project Builder (Node Microservices + Postgres)</strong>
+                <input
+                  value={builderProjectName}
+                  onChange={(event) => setBuilderProjectName(event.target.value)}
+                  placeholder="Project name"
+                />
+                <input
+                  value={builderOutputDir}
+                  onChange={(event) => setBuilderOutputDir(event.target.value)}
+                  placeholder="Output directory (workspace-relative)"
+                />
+                <div className="inline-search">
+                  <button
+                    onClick={() => { void runProjectBuilderMode(); }}
+                    disabled={builderRunning}
+                  >
+                    {builderRunning ? "Building..." : "Build Template"}
+                  </button>
+                </div>
+                {builderResult ? (
+                  <>
+                    <code>run: {builderResult.runId}</code>
+                    <code>root: {builderResult.projectRoot}</code>
+                    <code>
+                      services: api={String(builderResult.services.api)} worker={String(builderResult.services.worker)} postgres={String(builderResult.services.postgres)}
+                    </code>
+                    <code>
+                      completeness: {builderResult.completeness.completenessPercent}% (missing: {builderResult.completeness.missing.join(", ") || "none"})
+                    </code>
+                    <code>generated files: {builderResult.generatedFiles.length}</code>
+                  </>
+                ) : null}
               </div>
               {multiAgentSummary ? (
                 <div className="checkpoint-card">

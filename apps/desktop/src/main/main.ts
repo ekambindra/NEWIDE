@@ -30,6 +30,10 @@ import {
   type CommandRiskAssessment,
   type ParsedTestSummary
 } from "./terminal-utils.js";
+import {
+  buildProjectTemplate,
+  type ProjectBuilderResult
+} from "./project-builder.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -2966,6 +2970,44 @@ app.whenReady().then(async () => {
         metadata: {
           coordinator: result.coordinatorRunId,
           statuses: result.agentRuns.map((run) => ({ id: run.agentId, status: run.status }))
+        }
+      });
+
+      return result;
+    }
+  );
+
+  ipcMain.handle(
+    "auto:project-builder",
+    async (
+      _event,
+      payload: {
+        workspaceRoot: string;
+        projectName: string;
+        outputDir?: string;
+      }
+    ): Promise<ProjectBuilderResult> => {
+      const result = await buildProjectTemplate({
+        request: {
+          workspaceRoot: payload.workspaceRoot,
+          projectName: payload.projectName,
+          outputDir: payload.outputDir,
+          template: "node_microservices_postgres"
+        },
+        checkpointRoot: checkpointsRoot()
+      });
+
+      await appendAuditEvent({
+        action: "auto.project_builder",
+        target: result.projectRoot,
+        decision: "executed",
+        reason: "project builder template generated",
+        metadata: {
+          run_id: result.runId,
+          template: result.template,
+          generated_files: result.generatedFiles.length,
+          completeness: result.completeness.completenessPercent,
+          output_dir: relative(payload.workspaceRoot, result.projectRoot)
         }
       });
 

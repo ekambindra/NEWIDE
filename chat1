@@ -42,9 +42,13 @@ Project: Atlas Meridian (enterprise AI IDE)
 7. Added cross-file rename impact analysis with declaration/reference/collision metrics and affected line previews (IDX-014).
 8. Added deterministic auto-repair strategies and bounded repair trace artifacts in runtime (`repair_trace.json`) (AUTO-017).
 9. Added PR package artifact generation (`pr_package.json`, `pr_package.md`) including evidence/risk/rollback/owners (AUTO-018).
+10. Added project builder mode with deterministic run artifacts, audit events, and UI controls in Agent panel (AUTO-004).
+11. Added template generation for API service scaffold (`services/api`) in Node + TypeScript (AUTO-005).
+12. Added template generation for worker service scaffold (`services/worker`) in Node + TypeScript (AUTO-006).
+13. Added template Postgres integration (`db/init` SQL + compose/env wiring) for generated projects (AUTO-007).
 
 ## Current Progress Snapshot
-- Feature tracker currently records: 126/170 (74.1%).
+- Feature tracker currently records: 130/170 (76.5%).
 - In-progress areas include advanced indexing, autonomy builder extensions, enterprise SSO/RBAC/security layers, release hardening, and full benchmark KPIs.
 
 ## Continuation Rules
@@ -57,6 +61,6 @@ Project: Atlas Meridian (enterprise AI IDE)
 4. Never continue implementation before reading latest `chatN` continuity file.
 
 ## Immediate Next Tasks
-1. Continue next in-progress autonomy builder features: AUTO-002, AUTO-004, AUTO-005, AUTO-006, AUTO-007.
+1. Continue next in-progress autonomy builder feature: AUTO-002 multi-file refactor mode using call-graph/rename-impact grounding.
 2. Continue enterprise/public release pipeline milestones.
 3. Keep extending benchmark/KPI gates and regression-blocking CI behavior.

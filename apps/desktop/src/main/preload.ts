@@ -231,6 +231,27 @@ type GreenPipelineReport = {
   meetsTarget: boolean;
 };
 
+type ProjectBuilderResult = {
+  runId: string;
+  template: "node_microservices_postgres";
+  projectName: string;
+  projectRoot: string;
+  generatedAt: string;
+  generatedFiles: string[];
+  services: {
+    api: boolean;
+    worker: boolean;
+    postgres: boolean;
+  };
+  completeness: {
+    required: string[];
+    present: string[];
+    missing: string[];
+    completenessPercent: number;
+  };
+  checkpointPath: string;
+};
+
 type AuditEvent = {
   event_id: string;
   ts: string;
@@ -402,6 +423,11 @@ const api = {
     limit?: number;
     targetPercent?: number;
   }): Promise<GreenPipelineReport> => ipcRenderer.invoke("auto:green-pipeline", payload),
+  runProjectBuilder: (payload: {
+    workspaceRoot: string;
+    projectName: string;
+    outputDir?: string;
+  }): Promise<ProjectBuilderResult> => ipcRenderer.invoke("auto:project-builder", payload),
   runMultiAgentTask: (
     payload: { goal: string; acceptanceCriteria: string[]; agentCount: number }
   ): Promise<MultiAgentSummary> => ipcRenderer.invoke("agent:run-multi", payload),

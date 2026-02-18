@@ -2,8 +2,8 @@
 
 ## Current Completion
 
-- Completed features: 126/170
-- Completion percentage: 74.1%
+- Completed features: 130/170
+- Completion percentage: 76.5%
 
 ## Latest Implemented Increments
 
@@ -51,6 +51,10 @@
 42. Cross-file rename impact analysis with declaration/reference/collision counts and impacted line previews (IDX-014).
 43. Deterministic auto-repair loop with rotating bounded strategies, failure classification, repair hints, and `repair_trace.json` artifacts (AUTO-017).
 44. PR package generation artifacts (`pr_package.json` + `pr_package.md`) including evidence, checks, owners, risks, and rollback notes (AUTO-018).
+45. Project builder mode end-to-end (`auto:project-builder`) with deterministic checkpoint artifacts and audit integration (AUTO-004).
+46. Node API service scaffold generator for template builds (`services/api` TypeScript service) (AUTO-005).
+47. Node worker service scaffold generator for template builds (`services/worker` TypeScript worker) (AUTO-006).
+48. Postgres integration scaffold with SQL bootstrap and compose wiring for generated templates (AUTO-007).
 
 ## Verification Commands
 
