@@ -1,20 +1,34 @@
 import express from "express";
 import helmet from "helmet";
+import { join } from "node:path";
+import {
+  createEncryptedMetadataStore,
+  type ControlPlaneData
+} from "./encrypted-store.js";
 
 const app = express();
 app.use(helmet());
 app.use(express.json({ limit: "2mb" }));
 
-const memoryDb = {
-  orgs: [] as Array<{ id: string; name: string }>,
-  workspaces: [] as Array<{ id: string; orgId: string; name: string }>,
-  policies: [] as Array<{ id: string; orgId: string; payload: Record<string, unknown> }>,
-  auditEvents: [] as Array<Record<string, unknown>>,
-  metrics: [] as Array<Record<string, unknown>>
-};
+const metadataStore = createEncryptedMetadataStore({
+  dataDir:
+    process.env.CONTROL_PLANE_DATA_DIR ??
+    join(process.cwd(), ".atlas-meridian-control-plane"),
+  encryptionKey: process.env.CONTROL_PLANE_ENCRYPTION_KEY
+});
+const memoryDb: ControlPlaneData = metadataStore.load();
+
+function persistMetadata(): void {
+  metadataStore.save(memoryDb);
+}
 
 app.get("/health", (_req, res) => {
-  res.json({ ok: true, service: "control-plane" });
+  res.json({
+    ok: true,
+    service: "control-plane",
+    encryptionAtRest: true,
+    dataPath: metadataStore.getDataPath()
+  });
 });
 
 app.get("/orgs", (_req, res) => {
@@ -24,6 +38,7 @@ app.get("/orgs", (_req, res) => {
 app.post("/orgs", (req, res) => {
   const org = { id: crypto.randomUUID(), name: String(req.body.name ?? "Unnamed") };
   memoryDb.orgs.push(org);
+  persistMetadata();
   res.status(201).json(org);
 });
 
@@ -38,6 +53,7 @@ app.post("/workspaces", (req, res) => {
     name: String(req.body.name ?? "workspace")
   };
   memoryDb.workspaces.push(workspace);
+  persistMetadata();
   res.status(201).json(workspace);
 });
 
@@ -52,6 +68,7 @@ app.post("/policies", (req, res) => {
     payload: (req.body.payload ?? {}) as Record<string, unknown>
   };
   memoryDb.policies.push(policy);
+  persistMetadata();
   res.status(201).json(policy);
 });
 
@@ -66,6 +83,7 @@ app.post("/audit/events", (req, res) => {
     ts: new Date().toISOString()
   };
   memoryDb.auditEvents.push(event);
+  persistMetadata();
   res.status(201).json(event);
 });
 
@@ -80,6 +98,7 @@ app.post("/metrics", (req, res) => {
     ts: new Date().toISOString()
   };
   memoryDb.metrics.push(metric);
+  persistMetadata();
   res.status(201).json(metric);
 });
 
@@ -97,6 +116,36 @@ app.get("/releases", (_req, res) => {
     { channel: "stable", version: "0.1.0", notes: "bootstrap release" },
     { channel: "beta", version: "0.2.0-beta.1", notes: "experimental features" }
   ]);
+});
+
+app.post("/admin/backup", (_req, res) => {
+  const path = metadataStore.exportBackup();
+  res.status(201).json({ path });
+});
+
+app.post("/admin/restore", (req, res) => {
+  const path = String(req.body.path ?? "").trim();
+  if (!path) {
+    res.status(400).json({ error: "path is required" });
+    return;
+  }
+  const restored = metadataStore.importBackup(path);
+  memoryDb.orgs = restored.orgs;
+  memoryDb.workspaces = restored.workspaces;
+  memoryDb.policies = restored.policies;
+  memoryDb.auditEvents = restored.auditEvents;
+  memoryDb.metrics = restored.metrics;
+  persistMetadata();
+  res.json({
+    ok: true,
+    counts: {
+      orgs: memoryDb.orgs.length,
+      workspaces: memoryDb.workspaces.length,
+      policies: memoryDb.policies.length,
+      auditEvents: memoryDb.auditEvents.length,
+      metrics: memoryDb.metrics.length
+    }
+  });
 });
 
 const port = Number(process.env.CONTROL_PLANE_PORT ?? 4000);

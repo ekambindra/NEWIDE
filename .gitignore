@@ -7,3 +7,5 @@ checkpoints
 .DS_Store
 .vscode
 .env
+.atlas-meridian-control-plane
+apps/control-plane/.atlas-meridian-control-plane

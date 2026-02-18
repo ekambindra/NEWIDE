@@ -2,8 +2,8 @@
 
 ## Current Completion
 
-- Completed features: 140/170
-- Completion percentage: 82.4%
+- Completed features: 142/170
+- Completion percentage: 83.5%
 
 ## Latest Implemented Increments
 
@@ -65,6 +65,8 @@
 56. Privacy mode control that force-disables telemetry and blocks metric ingestion until privacy mode is turned off (ENT-013).
 57. TLS-enforced control-plane connectivity policy with strict URL validation and localhost-only insecure override for development (ENT-015).
 58. Self-hosted gateway mode support with configurable endpoint, token/org/workspace metadata, signed request headers, health checks, and desktop management UI (ENT-017).
+59. Encrypted-at-rest control-plane metadata store using AES-256-GCM with managed key handling and encrypted persistence of org/workspace/policy/audit/metric records (ENT-014).
+60. Control-plane backup/restore admin flows for encrypted metadata snapshots (`/admin/backup`, `/admin/restore`) to support recovery and migration workflows (CLOUD-009).
 
 ## Verification Commands
 
