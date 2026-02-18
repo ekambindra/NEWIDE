@@ -209,6 +209,10 @@ type DiffCheckpointRecord = {
   beforeContent: string;
   afterContent: string;
   appliedChunks: string[];
+  keyId: string;
+  manifestPath: string;
+  signature: string;
+  signatureValid?: boolean;
 };
 
 const panelTabs: PanelTab[] = ["agent", "plan", "diff", "checkpoints"];
@@ -482,6 +486,7 @@ export function App() {
   const [chunkDecisions, setChunkDecisions] = useState<Record<string, Record<string, "accepted" | "rejected">>>({});
   const [patchQueue, setPatchQueue] = useState<DiffQueueItem[]>([]);
   const [diffCheckpoints, setDiffCheckpoints] = useState<DiffCheckpointRecord[]>([]);
+  const [allowFullRewriteApply, setAllowFullRewriteApply] = useState(false);
   const [autoSaveMode, setAutoSaveMode] = useState<"manual" | "afterDelay" | "onBlur">("manual");
   const dragRef = useRef<null | "left" | "right" | "bottom">(null);
 
@@ -995,11 +1000,15 @@ export function App() {
       path: active.path,
       baseContent: active.originalContent,
       nextContent: active.content,
-      appliedChunks
+      appliedChunks,
+      allowFullRewrite: allowFullRewriteApply
     });
 
     if (!result.ok) {
-      setLogs((prev) => [`[diff-apply] conflict ${active.path}: ${result.reason ?? "unknown"}`, ...prev]);
+      setLogs((prev) => [
+        `[diff-apply] failed ${active.path}: ${result.reason ?? "unknown"}`,
+        ...prev
+      ]);
       return;
     }
 
@@ -1017,6 +1026,17 @@ export function App() {
     setPatchQueue((current) => current.filter((item) => item.file !== active.path));
     setLogs((prev) => [
       `[diff-apply] applied ${active.path} checkpoint=${result.checkpointId ?? "none"}`,
+      ...prev
+    ]);
+    setAllowFullRewriteApply(false);
+    await refreshAudit();
+    await refreshDiffCheckpoints();
+  };
+
+  const verifyDiffCheckpointSignature = async (checkpointId: string) => {
+    const result = await window.ide.verifyDiffCheckpointSignature(checkpointId);
+    setLogs((prev) => [
+      `[diff-signature] ${checkpointId} ${result.valid ? "valid" : `invalid: ${result.reason ?? "unknown"}`}`,
       ...prev
     ]);
     await refreshAudit();
@@ -1777,6 +1797,14 @@ export function App() {
                     <button onClick={() => { void applyPatchQueue(); }}>Apply Patch Queue</button>
                     <button onClick={() => { void refreshDiffCheckpoints(); }}>Refresh Diff Checkpoints</button>
                   </div>
+                  <label style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 10 }}>
+                    <input
+                      type="checkbox"
+                      checked={allowFullRewriteApply}
+                      onChange={(event) => setAllowFullRewriteApply(event.target.checked)}
+                    />
+                    Allow full-file rewrite override (policy-gated)
+                  </label>
                   <div className="inline-search" style={{ marginBottom: 10 }}>
                     <input
                       value={chunkRationale}
@@ -1821,10 +1849,17 @@ export function App() {
                       <div key={record.id} className="checkpoint-card">
                         <strong>{record.id}</strong>
                         <code>{record.createdAt}</code>
+                        <code>signature: {record.signatureValid === true ? "valid" : "invalid/unverified"}</code>
+                        <code>key: {record.keyId || "n/a"}</code>
                         <code>chunks: {record.appliedChunks.join(", ") || "none"}</code>
-                        <button onClick={() => { void revertDiffFromCheckpoint(record.id); }}>
-                          Revert To Checkpoint
-                        </button>
+                        <div className="inline-search">
+                          <button onClick={() => { void verifyDiffCheckpointSignature(record.id); }}>
+                            Verify Signature
+                          </button>
+                          <button onClick={() => { void revertDiffFromCheckpoint(record.id); }}>
+                            Revert To Checkpoint
+                          </button>
+                        </div>
                       </div>
                     ))}
                   {diffCheckpoints.filter((record) => record.path === active.path).length === 0 ? (

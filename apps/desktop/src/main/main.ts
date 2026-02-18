@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, createHmac, randomBytes, randomUUID } from "node:crypto";
 import { execFile, spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { promisify } from "node:util";
 import {
@@ -122,6 +122,20 @@ type DiffApplyResult = {
   reason: string | null;
 };
 
+type DiffPatchManifest = {
+  version: number;
+  checkpointId: string;
+  createdAt: string;
+  root: string;
+  path: string;
+  baseHash: string;
+  afterHash: string;
+  appliedChunks: string[];
+  payloadHash: string;
+  keyId: string;
+  signature: string;
+};
+
 type DiffCheckpointRecord = {
   id: string;
   createdAt: string;
@@ -131,6 +145,10 @@ type DiffCheckpointRecord = {
   beforeContent: string;
   afterContent: string;
   appliedChunks: string[];
+  keyId: string;
+  manifestPath: string;
+  signature: string;
+  signatureValid?: boolean;
 };
 
 type AuditEvent = {
@@ -239,6 +257,10 @@ function diffCheckpointRoot(): string {
   return join(runtimeDataRoot(), "diff-checkpoints");
 }
 
+function patchSigningKeyPath(): string {
+  return join(runtimeDataRoot(), "security", "patch-signing.key");
+}
+
 function isWithin(root: string, target: string): boolean {
   const rel = relative(root, target);
   return rel === "" || (!rel.startsWith("..") && !resolve(root, rel).startsWith(".."));
@@ -250,6 +272,42 @@ function normalizeLf(text: string): string {
 
 function hashText(text: string): string {
   return createHash("sha256").update(text).digest("hex");
+}
+
+let cachedPatchSigningSecret: string | null = null;
+
+async function getPatchSigningSecret(): Promise<string> {
+  if (cachedPatchSigningSecret) {
+    return cachedPatchSigningSecret;
+  }
+  const file = patchSigningKeyPath();
+  await fs.mkdir(dirname(file), { recursive: true });
+  if (existsSync(file)) {
+    cachedPatchSigningSecret = (await fs.readFile(file, "utf8")).trim();
+    if (cachedPatchSigningSecret) {
+      return cachedPatchSigningSecret;
+    }
+  }
+  cachedPatchSigningSecret = randomBytes(32).toString("hex");
+  await fs.writeFile(file, `${cachedPatchSigningSecret}\n`, "utf8");
+  return cachedPatchSigningSecret;
+}
+
+function patchManifestPath(checkpointId: string): string {
+  return join(diffCheckpointRoot(), `${checkpointId}.manifest.json`);
+}
+
+function canonicalManifestPayload(manifest: Omit<DiffPatchManifest, "payloadHash" | "keyId" | "signature">): string {
+  return JSON.stringify({
+    version: manifest.version,
+    checkpointId: manifest.checkpointId,
+    createdAt: manifest.createdAt,
+    root: manifest.root,
+    path: manifest.path,
+    baseHash: manifest.baseHash,
+    afterHash: manifest.afterHash,
+    appliedChunks: manifest.appliedChunks
+  });
 }
 
 function commandPolicy(command: string): PolicyResult {
@@ -1267,6 +1325,22 @@ function stopTerminalSession(sessionId: string): boolean {
   return true;
 }
 
+function computeLineChangeStats(baseContent: string, nextContent: string): {
+  changedLines: number;
+  totalLines: number;
+} {
+  const before = normalizeLf(baseContent).split("\n");
+  const after = normalizeLf(nextContent).split("\n");
+  const totalLines = Math.max(before.length, after.length);
+  let changedLines = 0;
+  for (let i = 0; i < totalLines; i += 1) {
+    if ((before[i] ?? "") !== (after[i] ?? "")) {
+      changedLines += 1;
+    }
+  }
+  return { changedLines, totalLines };
+}
+
 async function writeDiffCheckpoint(record: DiffCheckpointRecord): Promise<void> {
   await fs.mkdir(diffCheckpointRoot(), { recursive: true });
   await fs.writeFile(
@@ -1274,6 +1348,116 @@ async function writeDiffCheckpoint(record: DiffCheckpointRecord): Promise<void> 
     `${JSON.stringify(record, null, 2)}\n`,
     "utf8"
   );
+}
+
+async function writeSignedPatchManifest(record: DiffCheckpointRecord): Promise<DiffPatchManifest> {
+  const unsigned = {
+    version: 1,
+    checkpointId: record.id,
+    createdAt: record.createdAt,
+    root: record.root,
+    path: record.path,
+    baseHash: record.baseHash,
+    afterHash: hashText(normalizeLf(record.afterContent)),
+    appliedChunks: record.appliedChunks
+  };
+  const payload = canonicalManifestPayload(unsigned);
+  const payloadHash = hashText(payload);
+  const secret = await getPatchSigningSecret();
+  const keyId = hashText(secret).slice(0, 16);
+  const signature = createHmac("sha256", secret).update(payloadHash).digest("hex");
+  const manifest: DiffPatchManifest = {
+    ...unsigned,
+    payloadHash,
+    keyId,
+    signature
+  };
+  await fs.writeFile(
+    patchManifestPath(record.id),
+    `${JSON.stringify(manifest, null, 2)}\n`,
+    "utf8"
+  );
+  return manifest;
+}
+
+async function readPatchManifest(checkpointId: string): Promise<DiffPatchManifest | null> {
+  const path = patchManifestPath(checkpointId);
+  if (!existsSync(path)) {
+    return null;
+  }
+  try {
+    const raw = await fs.readFile(path, "utf8");
+    return JSON.parse(raw) as DiffPatchManifest;
+  } catch {
+    return null;
+  }
+}
+
+async function verifyPatchManifest(checkpointId: string): Promise<{
+  valid: boolean;
+  reason: string | null;
+  manifest: DiffPatchManifest | null;
+}> {
+  const manifest = await readPatchManifest(checkpointId);
+  if (!manifest) {
+    return {
+      valid: false,
+      reason: "manifest not found",
+      manifest: null
+    };
+  }
+  const checkpoint = await readDiffCheckpoint(checkpointId);
+  if (!checkpoint) {
+    return {
+      valid: false,
+      reason: "checkpoint not found",
+      manifest
+    };
+  }
+
+  const canonical = canonicalManifestPayload({
+    version: manifest.version,
+    checkpointId: manifest.checkpointId,
+    createdAt: manifest.createdAt,
+    root: manifest.root,
+    path: manifest.path,
+    baseHash: manifest.baseHash,
+    afterHash: manifest.afterHash,
+    appliedChunks: manifest.appliedChunks
+  });
+  const expectedPayloadHash = hashText(canonical);
+  if (expectedPayloadHash !== manifest.payloadHash) {
+    return {
+      valid: false,
+      reason: "manifest payload hash mismatch",
+      manifest
+    };
+  }
+
+  const secret = await getPatchSigningSecret();
+  const expectedSignature = createHmac("sha256", secret).update(manifest.payloadHash).digest("hex");
+  if (expectedSignature !== manifest.signature) {
+    return {
+      valid: false,
+      reason: "manifest signature mismatch",
+      manifest
+    };
+  }
+
+  const checkpointAfterHash = hashText(normalizeLf(checkpoint.afterContent));
+  if (checkpoint.baseHash !== manifest.baseHash || checkpointAfterHash !== manifest.afterHash) {
+    return {
+      valid: false,
+      reason: "checkpoint hash mismatch",
+      manifest
+    };
+  }
+
+  return {
+    valid: true,
+    reason: null,
+    manifest
+  };
 }
 
 async function readDiffCheckpoint(checkpointId: string): Promise<DiffCheckpointRecord | null> {
@@ -1297,12 +1481,20 @@ async function listDiffCheckpoints(limit: number): Promise<DiffCheckpointRecord[
   const entries = await fs.readdir(root, { withFileTypes: true });
   const records: DiffCheckpointRecord[] = [];
   for (const entry of entries) {
-    if (!entry.isFile() || !entry.name.endsWith(".json")) {
+    if (
+      !entry.isFile() ||
+      !entry.name.endsWith(".json") ||
+      entry.name.endsWith(".manifest.json")
+    ) {
       continue;
     }
     const loaded = await readDiffCheckpoint(entry.name.replace(/\.json$/i, ""));
     if (loaded) {
-      records.push(loaded);
+      const verification = await verifyPatchManifest(loaded.id);
+      records.push({
+        ...loaded,
+        signatureValid: verification.valid
+      });
     }
   }
   return records
@@ -1316,6 +1508,7 @@ async function applyDiffQueue(input: {
   baseContent: string;
   nextContent: string;
   appliedChunks: string[];
+  allowFullRewrite?: boolean;
 }): Promise<DiffApplyResult> {
   const current = await safeRead(input.root, input.path);
   if (current.binary || current.content === null) {
@@ -1338,8 +1531,19 @@ async function applyDiffQueue(input: {
     };
   }
 
+  const { changedLines, totalLines } = computeLineChangeStats(base, input.nextContent);
+  const fullRewrite = totalLines > 0 && changedLines === totalLines;
+  if (fullRewrite && input.allowFullRewrite !== true) {
+    return {
+      ok: false,
+      conflict: false,
+      checkpointId: null,
+      reason: "full-file rewrite blocked by policy (explicit override required)"
+    };
+  }
+
   await safeWrite(input.root, input.path, input.nextContent);
-  const record: DiffCheckpointRecord = {
+  const recordBase: DiffCheckpointRecord = {
     id: `diff-${Date.now()}-${randomUUID().slice(0, 8)}`,
     createdAt: nowIso(),
     root: input.root,
@@ -1347,7 +1551,19 @@ async function applyDiffQueue(input: {
     baseHash: hashText(base),
     beforeContent: input.baseContent,
     afterContent: input.nextContent,
-    appliedChunks: input.appliedChunks
+    appliedChunks: input.appliedChunks,
+    keyId: "",
+    manifestPath: "",
+    signature: "",
+    signatureValid: true
+  };
+  const manifest = await writeSignedPatchManifest(recordBase);
+  const record: DiffCheckpointRecord = {
+    ...recordBase,
+    keyId: manifest.keyId,
+    manifestPath: patchManifestPath(recordBase.id),
+    signature: manifest.signature,
+    signatureValid: true
   };
   await writeDiffCheckpoint(record);
   return {
@@ -1369,6 +1585,14 @@ async function revertDiffCheckpoint(checkpointId: string): Promise<{
       ok: false,
       checkpoint: null,
       reason: "checkpoint not found"
+    };
+  }
+  const verification = await verifyPatchManifest(checkpointId);
+  if (!verification.valid) {
+    return {
+      ok: false,
+      checkpoint: null,
+      reason: `manifest verification failed: ${verification.reason ?? "unknown"}`
     };
   }
   await safeWrite(checkpoint.root, checkpoint.path, checkpoint.beforeContent);
@@ -1917,6 +2141,7 @@ app.whenReady().then(async () => {
         baseContent: string;
         nextContent: string;
         appliedChunks: string[];
+        allowFullRewrite?: boolean;
       }
     ): Promise<DiffApplyResult> => {
       const result = await applyDiffQueue({
@@ -1924,17 +2149,26 @@ app.whenReady().then(async () => {
         path: payload.path,
         baseContent: payload.baseContent,
         nextContent: payload.nextContent,
-        appliedChunks: payload.appliedChunks ?? []
+        appliedChunks: payload.appliedChunks ?? [],
+        allowFullRewrite: payload.allowFullRewrite === true
       });
       await appendAuditEvent({
         action: "diff.apply_queue",
         target: payload.path,
-        decision: result.ok ? "executed" : result.conflict ? "error" : "deny",
+        decision:
+          result.ok
+            ? "executed"
+            : result.reason?.includes("override required")
+              ? "require_approval"
+              : result.conflict
+                ? "error"
+                : "deny",
         reason: result.ok ? "diff queue applied" : (result.reason ?? "diff queue apply failed"),
         metadata: {
           root: payload.root,
           checkpoint_id: result.checkpointId,
-          chunk_count: payload.appliedChunks?.length ?? 0
+          chunk_count: payload.appliedChunks?.length ?? 0,
+          allow_full_rewrite: payload.allowFullRewrite === true
         }
       });
       return result;
@@ -1956,6 +2190,17 @@ app.whenReady().then(async () => {
         path: result.checkpoint?.path ?? null,
         root: result.checkpoint?.root ?? null
       }
+    });
+    return result;
+  });
+
+  ipcMain.handle("diff:verify-checkpoint-signature", async (_event, checkpointId: string) => {
+    const result = await verifyPatchManifest(checkpointId);
+    await appendAuditEvent({
+      action: "diff.verify_signature",
+      target: checkpointId,
+      decision: result.valid ? "executed" : "error",
+      reason: result.valid ? "diff checkpoint signature verified" : (result.reason ?? "signature verification failed")
     });
     return result;
   });

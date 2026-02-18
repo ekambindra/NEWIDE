@@ -110,6 +110,10 @@ type DiffCheckpointRecord = {
   beforeContent: string;
   afterContent: string;
   appliedChunks: string[];
+  keyId: string;
+  manifestPath: string;
+  signature: string;
+  signatureValid?: boolean;
 };
 
 type AuditEvent = {
@@ -241,6 +245,7 @@ const api = {
     baseContent: string;
     nextContent: string;
     appliedChunks: string[];
+    allowFullRewrite?: boolean;
   }): Promise<DiffApplyResult> => ipcRenderer.invoke("diff:apply-queue", payload),
   listDiffCheckpoints: (limit = 80): Promise<DiffCheckpointRecord[]> =>
     ipcRenderer.invoke("diff:list-checkpoints", limit),
@@ -249,6 +254,23 @@ const api = {
     checkpoint: DiffCheckpointRecord | null;
     reason: string | null;
   }> => ipcRenderer.invoke("diff:revert-checkpoint", checkpointId),
+  verifyDiffCheckpointSignature: (checkpointId: string): Promise<{
+    valid: boolean;
+    reason: string | null;
+    manifest: {
+      version: number;
+      checkpointId: string;
+      createdAt: string;
+      root: string;
+      path: string;
+      baseHash: string;
+      afterHash: string;
+      appliedChunks: string[];
+      payloadHash: string;
+      keyId: string;
+      signature: string;
+    } | null;
+  }> => ipcRenderer.invoke("diff:verify-checkpoint-signature", checkpointId),
   runMultiAgentTask: (
     payload: { goal: string; acceptanceCriteria: string[]; agentCount: number }
   ): Promise<MultiAgentSummary> => ipcRenderer.invoke("agent:run-multi", payload),

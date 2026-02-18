@@ -2,8 +2,8 @@
 
 ## Current Completion
 
-- Completed features: 112/170
-- Completion percentage: 65.9%
+- Completed features: 114/170
+- Completion percentage: 67.1%
 
 ## Latest Implemented Increments
 
@@ -36,6 +36,8 @@
 27. Controlled PTY-style terminal sessions with start/read/write/stop lifecycle and audit traces (TERM-001).
 28. Conflict-aware diff patch application against disk baseline with checkpointed apply records (DIFF-005).
 29. Patch revert-by-checkpoint workflow for file restoration after approved diff apply (DIFF-006).
+30. Full-file rewrite blocking in diff apply flow with explicit override requirement (DIFF-007).
+31. Signed patch manifests with local key-based signature verification for replay integrity (DIFF-012).
 
 ## Verification Commands
 
