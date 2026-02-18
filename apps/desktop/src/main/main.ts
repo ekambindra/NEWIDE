@@ -59,6 +59,12 @@ import {
   createControlPlaneClient,
   type ControlPlaneMetricRecord
 } from "./control-plane-client.js";
+import {
+  checkForUpdates,
+  configureAutoUpdater,
+  resolveReleaseChannel,
+  type ReleaseChannel
+} from "./updater.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -2431,6 +2437,8 @@ async function createWindow(): Promise<void> {
 
 app.whenReady().then(async () => {
   await fs.mkdir(checkpointsRoot(), { recursive: true });
+  let releaseChannel: ReleaseChannel = resolveReleaseChannel(process.env.ATLAS_UPDATE_CHANNEL);
+  configureAutoUpdater(releaseChannel);
   const authManager = createAuthManager(runtimeDataRoot());
   await authManager.initialize();
   const enterpriseSettingsManager = createEnterpriseSettingsManager(runtimeDataRoot());
@@ -3448,6 +3456,45 @@ app.whenReady().then(async () => {
       return result;
     }
   );
+
+  ipcMain.handle("updates:channel:get", async (): Promise<{ channel: ReleaseChannel }> => {
+    return { channel: releaseChannel };
+  });
+
+  ipcMain.handle(
+    "updates:channel:set",
+    async (_event, payload: { channel: "stable" | "beta" }): Promise<{ channel: ReleaseChannel }> => {
+      const { actor } = await requireAuthorization("auth.manage");
+      releaseChannel = resolveReleaseChannel(payload.channel);
+      configureAutoUpdater(releaseChannel);
+      await appendAuditEvent({
+        actor,
+        action: "updates.channel.set",
+        target: releaseChannel,
+        decision: "executed",
+        reason: "release channel updated",
+        metadata: { channel: releaseChannel }
+      });
+      return { channel: releaseChannel };
+    }
+  );
+
+  ipcMain.handle("updates:check", async () => {
+    const { actor } = await requireAuthorization("workspace.read");
+    const result = await checkForUpdates(releaseChannel);
+    await appendAuditEvent({
+      actor,
+      action: "updates.check",
+      target: releaseChannel,
+      decision: result.skipped ? "error" : "executed",
+      reason: result.reason ?? "update check completed",
+      metadata: {
+        skipped: result.skipped,
+        update_version: result.updateInfo?.version ?? null
+      }
+    });
+    return result;
+  });
 
   ipcMain.handle("checkpoints:list", async () => {
     return listCheckpoints();

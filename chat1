@@ -62,10 +62,14 @@ Project: Atlas Meridian (enterprise AI IDE)
 27. Added ECS blue/green deployment resources (CodeDeploy app + deployment group + blue/green target groups) in Terraform module for controlled rollout and rollback (CLOUD-008).
 28. Added GitHub Actions macOS desktop build pipeline with build/package/upload artifact workflow for release readiness (REL-001).
 29. Added GitHub Actions Windows desktop build pipeline with build/package/upload artifact workflow for release readiness (REL-002).
+30. Added release-ready Electron packaging config with DMG and MSI targets plus dedicated release scripts (`dist:mac`, `dist:win`, `release:stable`, `release:beta`) (REL-005).
+31. Added release workflow with macOS signing + notarization path and Windows signing path using CI secrets (`desktop-release.yml`) (REL-003, REL-004).
+32. Added runtime update channel support (stable/beta) with desktop controls for channel selection and update checks via new updater IPC APIs (REL-006).
+33. Added artifact provenance attestation in release workflow using `actions/attest-build-provenance` (REL-007).
 
 ## Current Progress Snapshot
-- Feature tracker currently records: 147/170 (86.5%).
-- In-progress areas include release hardening (signing/installers/update channels/provenance/docs portal) and full benchmark KPI regression gates.
+- Feature tracker currently records: 152/170 (89.4%).
+- In-progress areas include OSS/enterprise distribution workflows, public docs portal, and benchmark KPI regression gates.
 
 ## Continuation Rules
 1. Any new chat session must read this file first.
@@ -77,5 +81,5 @@ Project: Atlas Meridian (enterprise AI IDE)
 4. Never continue implementation before reading latest `chatN` continuity file.
 
 ## Immediate Next Tasks
-1. Continue release hardening: `REL-003..REL-010`.
+1. Continue release hardening: `REL-008..REL-010`.
 2. Continue evaluation expansion: `EVAL-002..EVAL-008`, `EVAL-010..EVAL-014`.

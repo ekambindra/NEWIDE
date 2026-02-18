@@ -22,11 +22,13 @@
 2. Windows signed MSI
 3. Stable and beta update channels
 4. Implemented CI build pipelines: `.github/workflows/desktop-build.yml` (macOS + Windows artifact builds)
+5. Implemented release pipeline: `.github/workflows/desktop-release.yml` (channel-aware signing, notarization, provenance attestation)
 
 ## CI/CD
 
 - GitHub Actions for lint/test/build
-- Planned: provenance attestations and release pipelines
+- Implemented provenance attestations in release workflow
+- Implemented release workflows for signed desktop artifacts
 
 ## Telemetry and Privacy
 

@@ -311,6 +311,19 @@ type ControlPlaneMetricRecord = {
   };
 };
 
+type ReleaseChannel = "stable" | "beta";
+
+type UpdateCheckResult = {
+  skipped: boolean;
+  channel: ReleaseChannel;
+  reason: string | null;
+  updateInfo: {
+    version: string;
+    files: number;
+    releaseDate: string | null;
+  } | null;
+};
+
 type ProjectBuilderResult = {
   runId: string;
   template: "node_microservices_postgres";
@@ -596,6 +609,11 @@ const api = {
     ipcRenderer.invoke("enterprise:control-plane:push-metrics", { records }),
   pushControlPlaneAudit: (limit = 20): Promise<ControlPlanePushResult> =>
     ipcRenderer.invoke("enterprise:control-plane:push-audit", { limit }),
+  getReleaseChannel: (): Promise<{ channel: ReleaseChannel }> =>
+    ipcRenderer.invoke("updates:channel:get"),
+  setReleaseChannel: (channel: ReleaseChannel): Promise<{ channel: ReleaseChannel }> =>
+    ipcRenderer.invoke("updates:channel:set", { channel }),
+  checkForUpdates: (): Promise<UpdateCheckResult> => ipcRenderer.invoke("updates:check"),
   runMultiAgentTask: (
     payload: { goal: string; acceptanceCriteria: string[]; agentCount: number }
   ): Promise<MultiAgentSummary> => ipcRenderer.invoke("agent:run-multi", payload),

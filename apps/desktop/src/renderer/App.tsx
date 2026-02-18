@@ -405,6 +405,19 @@ type ControlPlanePushResult = {
   reason: string | null;
 };
 
+type ReleaseChannel = "stable" | "beta";
+
+type UpdateCheckResult = {
+  skipped: boolean;
+  channel: ReleaseChannel;
+  reason: string | null;
+  updateInfo: {
+    version: string;
+    files: number;
+    releaseDate: string | null;
+  } | null;
+};
+
 type ProjectBuilderResult = {
   runId: string;
   template: "node_microservices_postgres";
@@ -783,6 +796,8 @@ export function App() {
   });
   const [controlPlaneHealth, setControlPlaneHealth] = useState<ControlPlaneHealthResult | null>(null);
   const [controlPlanePushResult, setControlPlanePushResult] = useState<ControlPlanePushResult | null>(null);
+  const [releaseChannel, setReleaseChannel] = useState<ReleaseChannel>("stable");
+  const [updateCheckResult, setUpdateCheckResult] = useState<UpdateCheckResult | null>(null);
   const [autoSaveMode, setAutoSaveMode] = useState<"manual" | "afterDelay" | "onBlur">("manual");
   const dragRef = useRef<null | "left" | "right" | "bottom">(null);
 
@@ -881,6 +896,11 @@ export function App() {
     });
   };
 
+  const refreshReleaseChannel = async () => {
+    const result = await window.ide.getReleaseChannel();
+    setReleaseChannel(result.channel);
+  };
+
   useEffect(() => {
     const keydown = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
@@ -921,6 +941,7 @@ export function App() {
     void refreshTeamData();
     void refreshAuthState();
     void refreshEnterpriseSettings();
+    void refreshReleaseChannel();
     void window.ide.startWatch(workspaceRoot);
     const unsubscribe = window.ide.onWorkspaceChanged(async () => {
       await refreshTree(workspaceRoot);
@@ -941,6 +962,7 @@ export function App() {
     void refreshTeamData();
     void refreshAuthState();
     void refreshEnterpriseSettings();
+    void refreshReleaseChannel();
   }, []);
 
   useEffect(() => {
@@ -1708,6 +1730,33 @@ export function App() {
     }
   };
 
+  const saveReleaseChannel = async () => {
+    try {
+      const result = await window.ide.setReleaseChannel(releaseChannel);
+      setReleaseChannel(result.channel);
+      await refreshAudit();
+      setLogs((prev) => [`[updates] release channel set to ${result.channel}`, ...prev]);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "failed to set release channel";
+      setLogs((prev) => [`[updates] channel error: ${message}`, ...prev]);
+    }
+  };
+
+  const runUpdateCheck = async () => {
+    try {
+      const result = await window.ide.checkForUpdates();
+      setUpdateCheckResult(result);
+      await refreshAudit();
+      setLogs((prev) => [
+        `[updates] check channel=${result.channel} skipped=${result.skipped}${result.reason ? ` reason=${result.reason}` : ""}`,
+        ...prev
+      ]);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "update check failed";
+      setLogs((prev) => [`[updates] check error: ${message}`, ...prev]);
+    }
+  };
+
   const toggleAuthRole = (role: AuthRole) => {
     setAuthSelectedRoles((current) => {
       if (current.includes(role)) {
@@ -2456,6 +2505,25 @@ export function App() {
                 {controlPlanePushResult ? (
                   <code>
                     push: sent={String(controlPlanePushResult.sent)} accepted={controlPlanePushResult.accepted} status={controlPlanePushResult.statusCode ?? "none"} reason={controlPlanePushResult.reason ?? "none"}
+                  </code>
+                ) : null}
+                <div className="inline-search">
+                  <label style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                    Release channel
+                    <select
+                      value={releaseChannel}
+                      onChange={(event) => setReleaseChannel(event.target.value as ReleaseChannel)}
+                    >
+                      <option value="stable">stable</option>
+                      <option value="beta">beta</option>
+                    </select>
+                  </label>
+                  <button onClick={() => { void saveReleaseChannel(); }}>Save Channel</button>
+                  <button onClick={() => { void runUpdateCheck(); }}>Check Updates</button>
+                </div>
+                {updateCheckResult ? (
+                  <code>
+                    update check: channel={updateCheckResult.channel} skipped={String(updateCheckResult.skipped)} version={updateCheckResult.updateInfo?.version ?? "none"} reason={updateCheckResult.reason ?? "none"}
                   </code>
                 ) : null}
               </div>

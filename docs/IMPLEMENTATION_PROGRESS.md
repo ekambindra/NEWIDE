@@ -2,8 +2,8 @@
 
 ## Current Completion
 
-- Completed features: 147/170
-- Completion percentage: 86.5%
+- Completed features: 152/170
+- Completion percentage: 89.4%
 
 ## Latest Implemented Increments
 
@@ -72,6 +72,11 @@
 63. Added ECS blue/green deployment resources using CodeDeploy app/deployment group with blue/green target groups and rollback settings (CLOUD-008).
 64. Added GitHub Actions macOS desktop build pipeline with artifact packaging/upload for distribution readiness checks (REL-001).
 65. Added GitHub Actions Windows desktop build pipeline with artifact packaging/upload for cross-platform release readiness (REL-002).
+66. Added macOS signing + notarization release workflow path using certificate secrets and `@electron/notarize` after-sign hook (REL-003).
+67. Added Windows code-signing release workflow path using signing certificate secrets for signed installers (REL-004).
+68. Added `electron-builder` packaging configuration for DMG (macOS) and MSI (Windows) artifacts with release scripts (REL-005).
+69. Added stable/beta release channel controls across release scripts, runtime updater channel configuration, and desktop UI channel management/check actions (REL-006).
+70. Added build provenance attestation steps in release workflow via `actions/attest-build-provenance` for desktop artifacts (REL-007).
 
 ## Verification Commands
 

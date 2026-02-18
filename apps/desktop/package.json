@@ -12,6 +12,13 @@
     "build": "npm run build:main && npm run build:renderer",
     "build:main": "tsc -p tsconfig.main.json",
     "build:renderer": "vite build",
+    "dist:mac": "npm run build && electron-builder --config electron-builder.yml --mac dmg zip --publish never",
+    "dist:win": "npm run build && electron-builder --config electron-builder.yml --win msi nsis --publish never",
+    "release:desktop:mac": "npm run build && electron-builder --config electron-builder.yml --mac dmg zip --publish always",
+    "release:desktop:win": "npm run build && electron-builder --config electron-builder.yml --win msi nsis --publish always",
+    "release:desktop:all": "npm run build && electron-builder --config electron-builder.yml --mac dmg zip --win msi nsis --publish always",
+    "release:stable": "cross-env ATLAS_UPDATE_CHANNEL=stable npm run release:desktop:all",
+    "release:beta": "cross-env ATLAS_UPDATE_CHANNEL=beta npm run release:desktop:all",
     "test": "vitest run",
     "lint": "tsc -p tsconfig.main.json --noEmit && tsc -p tsconfig.renderer.json --noEmit"
   },
@@ -19,17 +26,20 @@
     "@ide/agent-runtime": "0.1.0",
     "@ide/indexer": "0.1.0",
     "electron": "^35.0.3",
+    "electron-updater": "^6.3.9",
     "ignore": "^7.0.5",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },
   "devDependencies": {
+    "@electron/notarize": "^2.5.0",
     "@types/electron": "^1.6.12",
     "@types/react": "^19.0.12",
     "@types/react-dom": "^19.0.4",
     "@vitejs/plugin-react": "^4.3.4",
     "concurrently": "^9.1.2",
     "cross-env": "^7.0.3",
+    "electron-builder": "^24.13.3",
     "vite": "^6.2.2",
     "wait-on": "^8.0.2"
   }

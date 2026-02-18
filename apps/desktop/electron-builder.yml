@@ -1,0 +1,49 @@
+appId: com.atlasmeridian.ide
+productName: Atlas Meridian
+copyright: Copyright (c) Atlas Meridian
+directories:
+  output: release
+  buildResources: build
+files:
+  - dist/**
+  - package.json
+asar: true
+extraMetadata:
+  main: dist/main/main.js
+artifactName: "${productName}-${version}-${os}-${arch}.${ext}"
+publish:
+  - provider: generic
+    url: "${env.ATLAS_UPDATE_BASE_URL}"
+    channel: "${env.ATLAS_UPDATE_CHANNEL:-stable}"
+mac:
+  category: public.app-category.developer-tools
+  target:
+    - target: dmg
+      arch:
+        - arm64
+        - x64
+    - target: zip
+      arch:
+        - arm64
+        - x64
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+  notarize: false
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+    - target: msi
+      arch:
+        - x64
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  perMachine: false
+  artifactName: "${productName}-Setup-${version}.${ext}"
+msi:
+  artifactName: "${productName}-Installer-${version}.${ext}"
+afterSign: build/notarize.cjs

@@ -1,0 +1,83 @@
+name: desktop-release
+
+on:
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: Release channel
+        required: true
+        default: beta
+        type: choice
+        options:
+          - beta
+          - stable
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+jobs:
+  release-macos:
+    name: Release macOS (signed/notarized)
+    runs-on: macos-latest
+    env:
+      ATLAS_UPDATE_CHANNEL: ${{ github.event.inputs.channel || 'stable' }}
+      ATLAS_UPDATE_BASE_URL: ${{ vars.ATLAS_UPDATE_BASE_URL || 'https://updates.atlasmeridian.dev' }}
+      CSC_LINK: ${{ secrets.MACOS_CSC_LINK }}
+      CSC_KEY_PASSWORD: ${{ secrets.MACOS_CSC_KEY_PASSWORD }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Build and release macOS packages
+        run: npm run release:desktop:mac --workspace @ide/desktop
+      - name: Upload macOS release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: atlas-meridian-macos-${{ env.ATLAS_UPDATE_CHANNEL }}
+          path: apps/desktop/release/*
+      - name: Attest macOS artifacts
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: apps/desktop/release/*
+
+  release-windows:
+    name: Release Windows (signed)
+    runs-on: windows-latest
+    env:
+      ATLAS_UPDATE_CHANNEL: ${{ github.event.inputs.channel || 'stable' }}
+      ATLAS_UPDATE_BASE_URL: ${{ vars.ATLAS_UPDATE_BASE_URL || 'https://updates.atlasmeridian.dev' }}
+      CSC_LINK: ${{ secrets.WINDOWS_CSC_LINK }}
+      CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CSC_KEY_PASSWORD }}
+      WIN_CSC_LINK: ${{ secrets.WINDOWS_CSC_LINK }}
+      WIN_CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CSC_KEY_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Build and release Windows packages
+        run: npm run release:desktop:win --workspace @ide/desktop
+      - name: Upload Windows release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: atlas-meridian-windows-${{ env.ATLAS_UPDATE_CHANNEL }}
+          path: apps/desktop/release/*
+      - name: Attest Windows artifacts
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: apps/desktop/release/*
