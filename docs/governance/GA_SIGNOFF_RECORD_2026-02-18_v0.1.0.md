@@ -2,14 +2,14 @@
 
 - Execution date (UTC): 2026-02-18
 - Release tag: `v0.1.0`
-- Commit: `c40261a524292cb73b4c08da120daf5ce655d6fb`
+- Commit: `de411b7a4f14d579c05230c31587f4711ca8d574`
 
 ## Workflow Evidence
 
-- `ci`: [run 22127231638](https://github.com/ekambindra/atlas-meridian/actions/runs/22127231638) - success
-- `desktop-build`: [run 22127231645](https://github.com/ekambindra/atlas-meridian/actions/runs/22127231645) - success
-- `benchmark-gate`: [run 22127231649](https://github.com/ekambindra/atlas-meridian/actions/runs/22127231649) - success
-- `docs-site`: [run 22127231647](https://github.com/ekambindra/atlas-meridian/actions/runs/22127231647) - success
+- `ci`: [run 22127407090](https://github.com/ekambindra/atlas-meridian/actions/runs/22127407090) - success
+- `desktop-build`: [run 22127407083](https://github.com/ekambindra/atlas-meridian/actions/runs/22127407083) - success
+- `benchmark-gate`: [run 22127407063](https://github.com/ekambindra/atlas-meridian/actions/runs/22127407063) - success
+- `docs-site`: [run 22127407085](https://github.com/ekambindra/atlas-meridian/actions/runs/22127407085) - success
 - `desktop-release (stable, signed)`: [run 22127232444](https://github.com/ekambindra/atlas-meridian/actions/runs/22127232444) - success
 
 ## Reliability
