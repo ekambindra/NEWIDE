@@ -60,10 +60,12 @@ Project: Atlas Meridian (enterprise AI IDE)
 25. Added Terraform module `infra/terraform/modules/atlas-control-plane` with AWS baseline resources covering ECS/Fargate, RDS Postgres, S3 artifacts, and CloudFront edge delivery (CLOUD-006).
 26. Added Terraform environment roots for `staging` and `prod` with dedicated configuration and example tfvars templates (CLOUD-007).
 27. Added ECS blue/green deployment resources (CodeDeploy app + deployment group + blue/green target groups) in Terraform module for controlled rollout and rollback (CLOUD-008).
+28. Added GitHub Actions macOS desktop build pipeline with build/package/upload artifact workflow for release readiness (REL-001).
+29. Added GitHub Actions Windows desktop build pipeline with build/package/upload artifact workflow for release readiness (REL-002).
 
 ## Current Progress Snapshot
-- Feature tracker currently records: 145/170 (85.3%).
-- In-progress areas include release hardening (signing/installers/update channels/docs portal) and full benchmark KPI regression gates.
+- Feature tracker currently records: 147/170 (86.5%).
+- In-progress areas include release hardening (signing/installers/update channels/provenance/docs portal) and full benchmark KPI regression gates.
 
 ## Continuation Rules
 1. Any new chat session must read this file first.
@@ -75,5 +77,5 @@ Project: Atlas Meridian (enterprise AI IDE)
 4. Never continue implementation before reading latest `chatN` continuity file.
 
 ## Immediate Next Tasks
-1. Continue release hardening: `REL-001..REL-010`.
+1. Continue release hardening: `REL-003..REL-010`.
 2. Continue evaluation expansion: `EVAL-002..EVAL-008`, `EVAL-010..EVAL-014`.

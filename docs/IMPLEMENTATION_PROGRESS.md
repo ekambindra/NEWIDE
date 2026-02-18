@@ -2,8 +2,8 @@
 
 ## Current Completion
 
-- Completed features: 145/170
-- Completion percentage: 85.3%
+- Completed features: 147/170
+- Completion percentage: 86.5%
 
 ## Latest Implemented Increments
 
@@ -70,6 +70,8 @@
 61. Added Terraform AWS baseline module for managed control-plane deployment with ECS/Fargate service, RDS Postgres, S3 artifact bucket, and CloudFront edge entrypoint (CLOUD-006).
 62. Added isolated Terraform environment roots for `staging` and `prod` with dedicated CIDR plans, capacity profiles, and tfvars templates (CLOUD-007).
 63. Added ECS blue/green deployment resources using CodeDeploy app/deployment group with blue/green target groups and rollback settings (CLOUD-008).
+64. Added GitHub Actions macOS desktop build pipeline with artifact packaging/upload for distribution readiness checks (REL-001).
+65. Added GitHub Actions Windows desktop build pipeline with artifact packaging/upload for cross-platform release readiness (REL-002).
 
 ## Verification Commands
 

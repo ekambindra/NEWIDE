@@ -21,6 +21,7 @@
 1. macOS signed/notarized build
 2. Windows signed MSI
 3. Stable and beta update channels
+4. Implemented CI build pipelines: `.github/workflows/desktop-build.yml` (macOS + Windows artifact builds)
 
 ## CI/CD
 

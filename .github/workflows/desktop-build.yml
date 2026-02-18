@@ -1,0 +1,54 @@
+name: desktop-build
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  desktop-macos:
+    name: macOS Desktop Build
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Build workspace packages
+        run: npm run build
+      - name: Package macOS desktop artifact
+        run: |
+          cd apps/desktop
+          tar -czf ../../atlas-meridian-desktop-macos.tar.gz dist package.json
+      - name: Upload macOS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: atlas-meridian-desktop-macos
+          path: atlas-meridian-desktop-macos.tar.gz
+
+  desktop-windows:
+    name: Windows Desktop Build
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Build workspace packages
+        run: npm run build
+      - name: Package Windows desktop artifact
+        shell: pwsh
+        run: |
+          Compress-Archive -Path apps/desktop/dist,apps/desktop/package.json -DestinationPath atlas-meridian-desktop-windows.zip -Force
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: atlas-meridian-desktop-windows
+          path: atlas-meridian-desktop-windows.zip
