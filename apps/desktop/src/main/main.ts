@@ -34,6 +34,10 @@ import {
   buildProjectTemplate,
   type ProjectBuilderResult
 } from "./project-builder.js";
+import {
+  runMultiFileRefactor,
+  type MultiFileRefactorResult
+} from "./refactor-mode.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -3008,6 +3012,80 @@ app.whenReady().then(async () => {
           generated_files: result.generatedFiles.length,
           completeness: result.completeness.completenessPercent,
           output_dir: relative(payload.workspaceRoot, result.projectRoot)
+        }
+      });
+
+      return result;
+    }
+  );
+
+  ipcMain.handle(
+    "auto:multi-refactor",
+    async (
+      _event,
+      payload: {
+        root: string;
+        from: string;
+        to: string;
+        previewOnly?: boolean;
+        allowSensitive?: boolean;
+        maxFiles?: number;
+      }
+    ): Promise<MultiFileRefactorResult> => {
+      const maxFiles = Math.max(20, Math.min(5000, Number(payload.maxFiles) || 1200));
+      const index = await runWorkspaceIndex(
+        payload.root,
+        maxFiles,
+        `${payload.from} ${payload.to}`,
+        5000,
+        payload.from,
+        payload.to
+      );
+      const impacts = index.renameImpact?.impacts ?? [];
+      const impactedSet = new Set(impacts.map((item) => normalizeRepoPath(item.file)));
+      const relatedEdges = index.callGraph.edges
+        .filter((edge) => {
+          if (!impactedSet.has(normalizeRepoPath(edge.file))) {
+            return false;
+          }
+          return (
+            edge.from.includes(payload.from) ||
+            edge.to.includes(payload.from) ||
+            edge.from.includes(payload.to) ||
+            edge.to.includes(payload.to)
+          );
+        })
+        .slice(0, 120);
+
+      const result = await runMultiFileRefactor({
+        root: payload.root,
+        from: payload.from,
+        to: payload.to,
+        impacts,
+        previewOnly: payload.previewOnly !== false,
+        allowSensitive: payload.allowSensitive === true,
+        checkpointRoot: checkpointsRoot(),
+        relatedEdges
+      });
+
+      await appendAuditEvent({
+        action: "auto.multi_refactor",
+        target: `${payload.from} -> ${payload.to}`,
+        decision:
+          result.status === "blocked"
+            ? "require_approval"
+            : result.status === "failed"
+              ? "error"
+              : "executed",
+        reason: `multi-file refactor ${result.status}`,
+        metadata: {
+          run_id: result.runId,
+          preview_only: result.previewOnly,
+          files_touched: result.filesTouched,
+          total_matches: result.totalMatches,
+          sensitive_touched: result.sensitiveTouched,
+          blocked_sensitive: result.blockedSensitive,
+          related_edges: result.grounding.edgeCount
         }
       });
 

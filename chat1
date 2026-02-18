@@ -46,9 +46,10 @@ Project: Atlas Meridian (enterprise AI IDE)
 11. Added template generation for API service scaffold (`services/api`) in Node + TypeScript (AUTO-005).
 12. Added template generation for worker service scaffold (`services/worker`) in Node + TypeScript (AUTO-006).
 13. Added template Postgres integration (`db/init` SQL + compose/env wiring) for generated projects (AUTO-007).
+14. Added multi-file refactor mode with preview/apply, sensitive-path approval gate, deterministic artifacts, and grounding from rename-impact + call graph (AUTO-002).
 
 ## Current Progress Snapshot
-- Feature tracker currently records: 130/170 (76.5%).
+- Feature tracker currently records: 131/170 (77.1%).
 - In-progress areas include advanced indexing, autonomy builder extensions, enterprise SSO/RBAC/security layers, release hardening, and full benchmark KPIs.
 
 ## Continuation Rules
@@ -61,6 +62,6 @@ Project: Atlas Meridian (enterprise AI IDE)
 4. Never continue implementation before reading latest `chatN` continuity file.
 
 ## Immediate Next Tasks
-1. Continue next in-progress autonomy builder feature: AUTO-002 multi-file refactor mode using call-graph/rename-impact grounding.
-2. Continue enterprise/public release pipeline milestones.
+1. Continue enterprise/public release milestones: ENT-001..003, ENT-008..009, ENT-012..015, ENT-017.
+2. Continue cloud/release milestones: CLOUD-006..009 and REL-001..010.
 3. Keep extending benchmark/KPI gates and regression-blocking CI behavior.

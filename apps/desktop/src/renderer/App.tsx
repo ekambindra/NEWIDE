@@ -351,6 +351,41 @@ type ProjectBuilderResult = {
   checkpointPath: string;
 };
 
+type MultiFileRefactorResult = {
+  runId: string;
+  status: "preview" | "applied" | "blocked" | "failed";
+  from: string;
+  to: string;
+  previewOnly: boolean;
+  allowSensitive: boolean;
+  generatedAt: string;
+  filesTouched: number;
+  totalMatches: number;
+  sensitiveTouched: number;
+  blockedSensitive: string[];
+  files: Array<{
+    file: string;
+    matches: number;
+    declarationMatches: number;
+    referenceMatches: number;
+    collisionMatches: number;
+    lines: number[];
+    sensitive: boolean;
+    beforeHash: string;
+    afterHash: string;
+  }>;
+  checkpointPath: string;
+  grounding: {
+    relatedEdges: Array<{
+      file: string;
+      from: string;
+      to: string;
+      line: number;
+    }>;
+    edgeCount: number;
+  };
+};
+
 const panelTabs: PanelTab[] = ["agent", "plan", "diff", "checkpoints"];
 const bottomTabs: BottomTab[] = ["terminal", "tests", "logs"];
 const leftTabs: LeftTab[] = ["files", "search"];
@@ -635,6 +670,13 @@ export function App() {
   const [builderOutputDir, setBuilderOutputDir] = useState("generated-projects/atlas-meridian-service-stack");
   const [builderResult, setBuilderResult] = useState<ProjectBuilderResult | null>(null);
   const [builderRunning, setBuilderRunning] = useState(false);
+  const [refactorFrom, setRefactorFrom] = useState("runTask");
+  const [refactorTo, setRefactorTo] = useState("executeTask");
+  const [refactorMaxFiles, setRefactorMaxFiles] = useState("1200");
+  const [refactorPreviewOnly, setRefactorPreviewOnly] = useState(true);
+  const [refactorAllowSensitive, setRefactorAllowSensitive] = useState(false);
+  const [refactorRunning, setRefactorRunning] = useState(false);
+  const [refactorResult, setRefactorResult] = useState<MultiFileRefactorResult | null>(null);
   const [autoSaveMode, setAutoSaveMode] = useState<"manual" | "afterDelay" | "onBlur">("manual");
   const dragRef = useRef<null | "left" | "right" | "bottom">(null);
 
@@ -1360,6 +1402,39 @@ export function App() {
     }
   };
 
+  const runMultiFileRefactorMode = async () => {
+    if (!workspaceRoot || !refactorFrom.trim() || !refactorTo.trim() || refactorRunning) {
+      return;
+    }
+    setRefactorRunning(true);
+    try {
+      const result = await window.ide.runMultiFileRefactor({
+        root: workspaceRoot,
+        from: refactorFrom.trim(),
+        to: refactorTo.trim(),
+        previewOnly: refactorPreviewOnly,
+        allowSensitive: refactorAllowSensitive,
+        maxFiles: Math.max(20, Math.min(5000, Number(refactorMaxFiles) || 1200))
+      });
+      setRefactorResult(result);
+      await refreshCheckpoints();
+      await refreshAudit();
+      if (!result.previewOnly && result.status === "applied") {
+        await refreshTree(workspaceRoot);
+      }
+      setLogs((prev) => [
+        `[multi-refactor] ${result.status} ${result.from}->${result.to} files=${result.filesTouched} matches=${result.totalMatches}`,
+        ...prev
+      ]);
+      setPanelTab("plan");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "multi-file refactor failed";
+      setLogs((prev) => [`[multi-refactor] error: ${message}`, ...prev]);
+    } finally {
+      setRefactorRunning(false);
+    }
+  };
+
   const createMemoryEntry = async () => {
     if (!memoryTitle.trim() || !memoryContent.trim()) {
       return;
@@ -1756,6 +1831,69 @@ export function App() {
                       completeness: {builderResult.completeness.completenessPercent}% (missing: {builderResult.completeness.missing.join(", ") || "none"})
                     </code>
                     <code>generated files: {builderResult.generatedFiles.length}</code>
+                  </>
+                ) : null}
+              </div>
+              <div className="checkpoint-card">
+                <strong>Multi-file Refactor Mode</strong>
+                <div className="inline-search">
+                  <input
+                    value={refactorFrom}
+                    onChange={(event) => setRefactorFrom(event.target.value)}
+                    placeholder="Rename from"
+                  />
+                  <input
+                    value={refactorTo}
+                    onChange={(event) => setRefactorTo(event.target.value)}
+                    placeholder="Rename to"
+                  />
+                </div>
+                <div className="inline-search">
+                  <input
+                    value={refactorMaxFiles}
+                    onChange={(event) => setRefactorMaxFiles(event.target.value)}
+                    placeholder="Max files to scan"
+                  />
+                  <label style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                    <input
+                      type="checkbox"
+                      checked={refactorPreviewOnly}
+                      onChange={(event) => setRefactorPreviewOnly(event.target.checked)}
+                    />
+                    Preview only
+                  </label>
+                  <label style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                    <input
+                      type="checkbox"
+                      checked={refactorAllowSensitive}
+                      onChange={(event) => setRefactorAllowSensitive(event.target.checked)}
+                    />
+                    Allow sensitive
+                  </label>
+                </div>
+                <div className="inline-search">
+                  <button
+                    onClick={() => { void runMultiFileRefactorMode(); }}
+                    disabled={refactorRunning}
+                  >
+                    {refactorRunning ? "Running..." : "Run Refactor"}
+                  </button>
+                </div>
+                {refactorResult ? (
+                  <>
+                    <code>run: {refactorResult.runId}</code>
+                    <code>
+                      status: {refactorResult.status} | files={refactorResult.filesTouched} | matches={refactorResult.totalMatches}
+                    </code>
+                    <code>
+                      sensitive touched: {refactorResult.sensitiveTouched} | blocked: {refactorResult.blockedSensitive.join(", ") || "none"}
+                    </code>
+                    <code>grounding edges: {refactorResult.grounding.edgeCount}</code>
+                    {refactorResult.files.slice(0, 6).map((item) => (
+                      <code key={`refactor-${item.file}`}>
+                        {item.file} | matches={item.matches} | decl={item.declarationMatches} | ref={item.referenceMatches} | collisions={item.collisionMatches}
+                      </code>
+                    ))}
                   </>
                 ) : null}
               </div>

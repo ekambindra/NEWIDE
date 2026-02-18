@@ -252,6 +252,41 @@ type ProjectBuilderResult = {
   checkpointPath: string;
 };
 
+type MultiFileRefactorResult = {
+  runId: string;
+  status: "preview" | "applied" | "blocked" | "failed";
+  from: string;
+  to: string;
+  previewOnly: boolean;
+  allowSensitive: boolean;
+  generatedAt: string;
+  filesTouched: number;
+  totalMatches: number;
+  sensitiveTouched: number;
+  blockedSensitive: string[];
+  files: Array<{
+    file: string;
+    matches: number;
+    declarationMatches: number;
+    referenceMatches: number;
+    collisionMatches: number;
+    lines: number[];
+    sensitive: boolean;
+    beforeHash: string;
+    afterHash: string;
+  }>;
+  checkpointPath: string;
+  grounding: {
+    relatedEdges: Array<{
+      file: string;
+      from: string;
+      to: string;
+      line: number;
+    }>;
+    edgeCount: number;
+  };
+};
+
 type AuditEvent = {
   event_id: string;
   ts: string;
@@ -428,6 +463,14 @@ const api = {
     projectName: string;
     outputDir?: string;
   }): Promise<ProjectBuilderResult> => ipcRenderer.invoke("auto:project-builder", payload),
+  runMultiFileRefactor: (payload: {
+    root: string;
+    from: string;
+    to: string;
+    previewOnly?: boolean;
+    allowSensitive?: boolean;
+    maxFiles?: number;
+  }): Promise<MultiFileRefactorResult> => ipcRenderer.invoke("auto:multi-refactor", payload),
   runMultiAgentTask: (
     payload: { goal: string; acceptanceCriteria: string[]; agentCount: number }
   ): Promise<MultiAgentSummary> => ipcRenderer.invoke("agent:run-multi", payload),

@@ -2,8 +2,8 @@
 
 ## Current Completion
 
-- Completed features: 130/170
-- Completion percentage: 76.5%
+- Completed features: 131/170
+- Completion percentage: 77.1%
 
 ## Latest Implemented Increments
 
@@ -55,6 +55,7 @@
 46. Node API service scaffold generator for template builds (`services/api` TypeScript service) (AUTO-005).
 47. Node worker service scaffold generator for template builds (`services/worker` TypeScript worker) (AUTO-006).
 48. Postgres integration scaffold with SQL bootstrap and compose wiring for generated templates (AUTO-007).
+49. Multi-file refactor mode with preview/apply flows, sensitive-path blocking, checkpoint artifacts, and call-graph/rename-impact grounding links (AUTO-002).
 
 ## Verification Commands
 
