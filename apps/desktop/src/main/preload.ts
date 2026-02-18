@@ -99,6 +99,7 @@ type DiffApplyResult = {
   conflict: boolean;
   checkpointId: string | null;
   reason: string | null;
+  secretFindings?: number;
 };
 
 type DiffCheckpointRecord = {
@@ -417,6 +418,7 @@ const api = {
     nextContent: string;
     appliedChunks: string[];
     allowFullRewrite?: boolean;
+    allowSecrets?: boolean;
   }): Promise<DiffApplyResult> => ipcRenderer.invoke("diff:apply-queue", payload),
   listDiffCheckpoints: (limit = 80): Promise<DiffCheckpointRecord[]> =>
     ipcRenderer.invoke("diff:list-checkpoints", limit),

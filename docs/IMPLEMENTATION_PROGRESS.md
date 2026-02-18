@@ -2,8 +2,8 @@
 
 ## Current Completion
 
-- Completed features: 131/170
-- Completion percentage: 77.1%
+- Completed features: 133/170
+- Completion percentage: 78.2%
 
 ## Latest Implemented Increments
 
@@ -56,6 +56,8 @@
 47. Node worker service scaffold generator for template builds (`services/worker` TypeScript worker) (AUTO-006).
 48. Postgres integration scaffold with SQL bootstrap and compose wiring for generated templates (AUTO-007).
 49. Multi-file refactor mode with preview/apply flows, sensitive-path blocking, checkpoint artifacts, and call-graph/rename-impact grounding links (AUTO-002).
+50. Secret detection gate added before diff patch apply with rule-based findings and explicit blocking when potential credentials are introduced (ENT-008).
+51. Audit/event log redaction layer added for secret-like values in targets/reasons/metadata with recursive sanitization and deterministic checksums over redacted payloads (ENT-009).
 
 ## Verification Commands
 

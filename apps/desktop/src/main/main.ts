@@ -31,6 +31,10 @@ import {
   type ParsedTestSummary
 } from "./terminal-utils.js";
 import {
+  redactAuditValue,
+  scanSecretFindings
+} from "./security-utils.js";
+import {
   buildProjectTemplate,
   type ProjectBuilderResult
 } from "./project-builder.js";
@@ -139,6 +143,7 @@ type DiffApplyResult = {
   conflict: boolean;
   checkpointId: string | null;
   reason: string | null;
+  secretFindings?: number;
 };
 
 type DiffPatchManifest = {
@@ -455,10 +460,10 @@ async function appendAuditEvent(input: {
     ts: nowIso(),
     actor: input.actor ?? "desktop-user",
     action: input.action,
-    target: input.target,
+    target: redactAuditValue(input.target, "target") as string,
     decision: input.decision,
-    reason: input.reason,
-    metadata: input.metadata ?? {}
+    reason: redactAuditValue(input.reason, "reason") as string,
+    metadata: (redactAuditValue(input.metadata ?? {}, "metadata") as Record<string, unknown>) ?? {}
   };
 
   const checksum = createHash("sha256")
@@ -1789,6 +1794,7 @@ async function applyDiffQueue(input: {
   nextContent: string;
   appliedChunks: string[];
   allowFullRewrite?: boolean;
+  allowSecrets?: boolean;
 }): Promise<DiffApplyResult> {
   const current = await safeRead(input.root, input.path);
   if (current.binary || current.content === null) {
@@ -1819,6 +1825,18 @@ async function applyDiffQueue(input: {
       conflict: false,
       checkpointId: null,
       reason: "full-file rewrite blocked by policy (explicit override required)"
+    };
+  }
+
+  const secretFindings = scanSecretFindings(input.nextContent, 10);
+  if (secretFindings.length > 0 && input.allowSecrets !== true) {
+    const ruleSummary = [...new Set(secretFindings.map((item) => item.rule))].slice(0, 4).join(", ");
+    return {
+      ok: false,
+      conflict: false,
+      checkpointId: null,
+      reason: `secret detection blocked patch apply (${ruleSummary})`,
+      secretFindings: secretFindings.length
     };
   }
 
@@ -2461,6 +2479,7 @@ app.whenReady().then(async () => {
         nextContent: string;
         appliedChunks: string[];
         allowFullRewrite?: boolean;
+        allowSecrets?: boolean;
       }
     ): Promise<DiffApplyResult> => {
       const result = await applyDiffQueue({
@@ -2469,7 +2488,8 @@ app.whenReady().then(async () => {
         baseContent: payload.baseContent,
         nextContent: payload.nextContent,
         appliedChunks: payload.appliedChunks ?? [],
-        allowFullRewrite: payload.allowFullRewrite === true
+        allowFullRewrite: payload.allowFullRewrite === true,
+        allowSecrets: payload.allowSecrets === true
       });
       const checkpoint =
         result.checkpointId ? await readDiffCheckpoint(result.checkpointId) : null;
@@ -2490,7 +2510,8 @@ app.whenReady().then(async () => {
           checkpoint_id: result.checkpointId,
           chunk_count: payload.appliedChunks?.length ?? 0,
           allow_full_rewrite: payload.allowFullRewrite === true,
-          grounding_evidence_count: checkpoint?.groundingEvidenceCount ?? null
+          grounding_evidence_count: checkpoint?.groundingEvidenceCount ?? null,
+          secret_findings: result.secretFindings ?? 0
         }
       });
       return result;

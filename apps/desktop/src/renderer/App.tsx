@@ -217,6 +217,14 @@ type DiffCheckpointRecord = {
   signatureValid?: boolean;
 };
 
+type DiffApplyResult = {
+  ok: boolean;
+  conflict: boolean;
+  checkpointId: string | null;
+  reason: string | null;
+  secretFindings?: number;
+};
+
 type WorkspaceIndexReport = {
   root: string;
   generatedAt: string;
