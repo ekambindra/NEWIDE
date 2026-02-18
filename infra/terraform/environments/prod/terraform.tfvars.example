@@ -1,0 +1,4 @@
+aws_region          = "us-east-1"
+container_image     = "123456789012.dkr.ecr.us-east-1.amazonaws.com/atlas-control-plane:prod"
+db_password         = "replace-with-secret"
+acm_certificate_arn = "arn:aws:acm:us-east-1:123456789012:certificate/replace-me"

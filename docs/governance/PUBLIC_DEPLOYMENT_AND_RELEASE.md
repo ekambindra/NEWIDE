@@ -8,7 +8,13 @@
 ## Cloud Target
 
 - AWS baseline
-- Planned: ECS/Fargate, RDS, S3, CloudFront/API Gateway, staging/prod separation
+- Implemented IaC baseline in `infra/terraform`:
+  - ECS/Fargate control-plane service
+  - RDS Postgres metadata store
+  - S3 artifact bucket
+  - CloudFront front door
+  - Staging/prod environment roots
+  - ECS blue/green deployment group via CodeDeploy
 
 ## Desktop Distribution Targets
 

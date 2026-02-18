@@ -2,8 +2,8 @@
 
 ## Current Completion
 
-- Completed features: 142/170
-- Completion percentage: 83.5%
+- Completed features: 145/170
+- Completion percentage: 85.3%
 
 ## Latest Implemented Increments
 
@@ -67,6 +67,9 @@
 58. Self-hosted gateway mode support with configurable endpoint, token/org/workspace metadata, signed request headers, health checks, and desktop management UI (ENT-017).
 59. Encrypted-at-rest control-plane metadata store using AES-256-GCM with managed key handling and encrypted persistence of org/workspace/policy/audit/metric records (ENT-014).
 60. Control-plane backup/restore admin flows for encrypted metadata snapshots (`/admin/backup`, `/admin/restore`) to support recovery and migration workflows (CLOUD-009).
+61. Added Terraform AWS baseline module for managed control-plane deployment with ECS/Fargate service, RDS Postgres, S3 artifact bucket, and CloudFront edge entrypoint (CLOUD-006).
+62. Added isolated Terraform environment roots for `staging` and `prod` with dedicated CIDR plans, capacity profiles, and tfvars templates (CLOUD-007).
+63. Added ECS blue/green deployment resources using CodeDeploy app/deployment group with blue/green target groups and rollback settings (CLOUD-008).
 
 ## Verification Commands
 
