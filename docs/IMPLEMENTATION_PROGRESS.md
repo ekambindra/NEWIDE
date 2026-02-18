@@ -2,8 +2,8 @@
 
 ## Current Completion
 
-- Completed features: 109/170
-- Completion percentage: 64.1%
+- Completed features: 112/170
+- Completion percentage: 65.9%
 
 ## Latest Implemented Increments
 
@@ -33,6 +33,9 @@
 24. Agent runtime finalization bundles with approvals/evidence/rollback metadata (`finalization_bundle.json`) (AGENT-020).
 25. Terminal validation pipeline runner (`lint -> typecheck -> test -> build`) with checkpoint/audit integration (TERM-006).
 26. Structured test output parsing for Vitest/Jest/Pytest/JUnit surfaced in desktop test views (TERM-007).
+27. Controlled PTY-style terminal sessions with start/read/write/stop lifecycle and audit traces (TERM-001).
+28. Conflict-aware diff patch application against disk baseline with checkpointed apply records (DIFF-005).
+29. Patch revert-by-checkpoint workflow for file restoration after approved diff apply (DIFF-006).
 
 ## Verification Commands
 

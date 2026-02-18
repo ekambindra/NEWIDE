@@ -74,6 +74,44 @@ type PipelineResult = {
   artifactPath: string | null;
 };
 
+type TerminalSessionStartResult = {
+  sessionId: string | null;
+  status: "running" | "exited" | "failed" | "stopped" | "blocked" | "denied";
+  policy: {
+    decision: "allow" | "deny" | "require_approval";
+    reason: string;
+  };
+  highRisk: TerminalResult["highRisk"];
+  reason: string;
+};
+
+type TerminalSessionSnapshot = {
+  sessionId: string;
+  status: "running" | "exited" | "failed" | "stopped";
+  exitCode: number | null;
+  output: string;
+  startedAt: string;
+  endedAt: string | null;
+} | null;
+
+type DiffApplyResult = {
+  ok: boolean;
+  conflict: boolean;
+  checkpointId: string | null;
+  reason: string | null;
+};
+
+type DiffCheckpointRecord = {
+  id: string;
+  createdAt: string;
+  root: string;
+  path: string;
+  baseHash: string;
+  beforeContent: string;
+  afterContent: string;
+  appliedChunks: string[];
+};
+
 type AuditEvent = {
   event_id: string;
   ts: string;
@@ -181,6 +219,14 @@ const api = {
     ipcRenderer.invoke("git:status", root),
   runCommand: (root: string, command: string): Promise<TerminalResult> =>
     ipcRenderer.invoke("terminal:run", root, command),
+  startTerminalSession: (root: string, command: string): Promise<TerminalSessionStartResult> =>
+    ipcRenderer.invoke("terminal:session:start", root, command),
+  readTerminalSession: (sessionId: string): Promise<TerminalSessionSnapshot> =>
+    ipcRenderer.invoke("terminal:session:read", sessionId),
+  writeTerminalSession: (sessionId: string, input: string): Promise<{ ok: boolean }> =>
+    ipcRenderer.invoke("terminal:session:write", sessionId, input),
+  stopTerminalSession: (sessionId: string): Promise<{ ok: boolean }> =>
+    ipcRenderer.invoke("terminal:session:stop", sessionId),
   runApprovedCommand: (root: string, command: string): Promise<TerminalResult> =>
     ipcRenderer.invoke("terminal:run-approved", root, command),
   runPipeline: (
@@ -189,6 +235,20 @@ const api = {
   ): Promise<PipelineResult> => ipcRenderer.invoke("terminal:run-pipeline", root, commands),
   replayTerminal: (limit: number): Promise<Array<{ runId: string; command: string; status: string; output: string }>> =>
     ipcRenderer.invoke("terminal:replay", limit),
+  applyDiffQueue: (payload: {
+    root: string;
+    path: string;
+    baseContent: string;
+    nextContent: string;
+    appliedChunks: string[];
+  }): Promise<DiffApplyResult> => ipcRenderer.invoke("diff:apply-queue", payload),
+  listDiffCheckpoints: (limit = 80): Promise<DiffCheckpointRecord[]> =>
+    ipcRenderer.invoke("diff:list-checkpoints", limit),
+  revertDiffCheckpoint: (checkpointId: string): Promise<{
+    ok: boolean;
+    checkpoint: DiffCheckpointRecord | null;
+    reason: string | null;
+  }> => ipcRenderer.invoke("diff:revert-checkpoint", checkpointId),
   runMultiAgentTask: (
     payload: { goal: string; acceptanceCriteria: string[]; agentCount: number }
   ): Promise<MultiAgentSummary> => ipcRenderer.invoke("agent:run-multi", payload),

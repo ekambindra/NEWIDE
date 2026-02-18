@@ -175,6 +175,42 @@ type PipelineResult = {
   artifactPath: string | null;
 };
 
+type TerminalSessionStartResult = {
+  sessionId: string | null;
+  status: "running" | "exited" | "failed" | "stopped" | "blocked" | "denied";
+  policy: {
+    decision: "allow" | "deny" | "require_approval";
+    reason: string;
+  };
+  highRisk: {
+    requiresApproval: boolean;
+    categories: string[];
+    reasons: string[];
+    prompt: string | null;
+  } | null;
+  reason: string;
+};
+
+type TerminalSessionSnapshot = {
+  sessionId: string;
+  status: "running" | "exited" | "failed" | "stopped";
+  exitCode: number | null;
+  output: string;
+  startedAt: string;
+  endedAt: string | null;
+};
+
+type DiffCheckpointRecord = {
+  id: string;
+  createdAt: string;
+  root: string;
+  path: string;
+  baseHash: string;
+  beforeContent: string;
+  afterContent: string;
+  appliedChunks: string[];
+};
+
 const panelTabs: PanelTab[] = ["agent", "plan", "diff", "checkpoints"];
 const bottomTabs: BottomTab[] = ["terminal", "tests", "logs"];
 const leftTabs: LeftTab[] = ["files", "search"];
@@ -371,6 +407,11 @@ export function App() {
   const [searchHits, setSearchHits] = useState<SearchHit[]>([]);
   const [terminalInput, setTerminalInput] = useState("npm run test");
   const [terminalOutput, setTerminalOutput] = useState<string[]>([]);
+  const [terminalSessionId, setTerminalSessionId] = useState<string | null>(null);
+  const [terminalSessionStatus, setTerminalSessionStatus] = useState<
+    "running" | "exited" | "failed" | "stopped" | "idle"
+  >("idle");
+  const [terminalSessionInput, setTerminalSessionInput] = useState("");
   const [testOutput, setTestOutput] = useState<string[]>([]);
   const [testSummaries, setTestSummaries] = useState<ParsedTestSummary[]>([]);
   const [pipelineResult, setPipelineResult] = useState<PipelineResult | null>(null);
@@ -440,6 +481,7 @@ export function App() {
   const [chunkRationale, setChunkRationale] = useState("keep meaningful behavior and preserve tests");
   const [chunkDecisions, setChunkDecisions] = useState<Record<string, Record<string, "accepted" | "rejected">>>({});
   const [patchQueue, setPatchQueue] = useState<DiffQueueItem[]>([]);
+  const [diffCheckpoints, setDiffCheckpoints] = useState<DiffCheckpointRecord[]>([]);
   const [autoSaveMode, setAutoSaveMode] = useState<"manual" | "afterDelay" | "onBlur">("manual");
   const dragRef = useRef<null | "left" | "right" | "bottom">(null);
 
@@ -482,6 +524,11 @@ export function App() {
   const refreshCheckpoints = async () => {
     const items = await window.ide.listCheckpoints();
     setCheckpoints(items);
+  };
+
+  const refreshDiffCheckpoints = async () => {
+    const items = await window.ide.listDiffCheckpoints(120);
+    setDiffCheckpoints(items);
   };
 
   const refreshTeamData = async () => {
@@ -529,6 +576,7 @@ export function App() {
     void refreshTree(workspaceRoot);
     void refreshAudit();
     void refreshCheckpoints();
+    void refreshDiffCheckpoints();
     void refreshTeamData();
     void window.ide.startWatch(workspaceRoot);
     const unsubscribe = window.ide.onWorkspaceChanged(async () => {
@@ -544,6 +592,7 @@ export function App() {
 
   useEffect(() => {
     void refreshCheckpoints();
+    void refreshDiffCheckpoints();
     void refreshAudit();
     void refreshTeamData();
   }, []);
@@ -558,6 +607,32 @@ export function App() {
     }, 1200);
     return () => clearTimeout(timer);
   }, [autoSaveMode, workspaceRoot, active?.path, active?.content, active?.dirty]);
+
+  useEffect(() => {
+    if (!terminalSessionId || terminalSessionStatus !== "running") {
+      return;
+    }
+    const interval = setInterval(() => {
+      void (async () => {
+        const snapshot = await window.ide.readTerminalSession(terminalSessionId);
+        if (!snapshot) {
+          setTerminalSessionStatus("failed");
+          return;
+        }
+        if (snapshot.output) {
+          setTerminalOutput((prev) => [snapshot.output, ...prev].slice(0, 400));
+        }
+        if (snapshot.status !== "running") {
+          setTerminalSessionStatus(snapshot.status);
+          setLogs((prev) => [
+            `[pty] session ${snapshot.sessionId} ${snapshot.status} exit=${snapshot.exitCode ?? "none"}`,
+            ...prev
+          ]);
+        }
+      })();
+    }, 300);
+    return () => clearInterval(interval);
+  }, [terminalSessionId, terminalSessionStatus]);
 
   useEffect(() => {
     const onMove = (event: MouseEvent) => {
@@ -701,6 +776,55 @@ export function App() {
       await refreshCheckpoints();
     }
     await refreshAudit();
+  };
+
+  const startPtySession = async () => {
+    if (!workspaceRoot || !terminalInput.trim()) {
+      return;
+    }
+    const result = (await window.ide.startTerminalSession(
+      workspaceRoot,
+      terminalInput.trim()
+    )) as TerminalSessionStartResult;
+    if (result.status === "running" && result.sessionId) {
+      setTerminalSessionId(result.sessionId);
+      setTerminalSessionStatus("running");
+      setTerminalOutput((prev) => [`$ [pty] ${terminalInput.trim()}`, ...prev].slice(0, 400));
+      setLogs((prev) => [`[pty] started ${result.sessionId}`, ...prev]);
+      return;
+    }
+
+    if (result.status === "blocked") {
+      setPendingApprovalCommand(terminalInput.trim());
+      setPendingApprovalReason(result.highRisk?.prompt ?? result.reason);
+      setPanelTab("plan");
+      setLogs((prev) => [`[pty] blocked ${result.reason}`, ...prev]);
+      return;
+    }
+
+    setLogs((prev) => [`[pty] denied ${result.reason}`, ...prev]);
+  };
+
+  const sendPtyInput = async () => {
+    if (!terminalSessionId || !terminalSessionInput) {
+      return;
+    }
+    const result = await window.ide.writeTerminalSession(terminalSessionId, terminalSessionInput);
+    if (result.ok) {
+      setTerminalOutput((prev) => [`> ${terminalSessionInput}`, ...prev].slice(0, 400));
+      setTerminalSessionInput("");
+    }
+  };
+
+  const stopPtySession = async () => {
+    if (!terminalSessionId) {
+      return;
+    }
+    const result = await window.ide.stopTerminalSession(terminalSessionId);
+    if (result.ok) {
+      setTerminalSessionStatus("stopped");
+      setLogs((prev) => [`[pty] stopped ${terminalSessionId}`, ...prev]);
+    }
   };
 
   const runPipeline = async () => {
@@ -857,6 +981,78 @@ export function App() {
       },
       ...current
     ].slice(0, 100));
+  };
+
+  const applyPatchQueue = async () => {
+    if (!workspaceRoot || !active || active.binary) {
+      return;
+    }
+    const appliedChunks = patchQueue
+      .filter((item) => item.file === active.path && item.decision === "accepted")
+      .map((item) => item.chunkId);
+    const result = await window.ide.applyDiffQueue({
+      root: workspaceRoot,
+      path: active.path,
+      baseContent: active.originalContent,
+      nextContent: active.content,
+      appliedChunks
+    });
+
+    if (!result.ok) {
+      setLogs((prev) => [`[diff-apply] conflict ${active.path}: ${result.reason ?? "unknown"}`, ...prev]);
+      return;
+    }
+
+    setTabs((current) =>
+      current.map((tab) =>
+        tab.path === active.path
+          ? { ...tab, originalContent: tab.content, dirty: false }
+          : tab
+      )
+    );
+    setChunkDecisions((current) => ({
+      ...current,
+      [active.path]: {}
+    }));
+    setPatchQueue((current) => current.filter((item) => item.file !== active.path));
+    setLogs((prev) => [
+      `[diff-apply] applied ${active.path} checkpoint=${result.checkpointId ?? "none"}`,
+      ...prev
+    ]);
+    await refreshAudit();
+    await refreshDiffCheckpoints();
+  };
+
+  const revertDiffFromCheckpoint = async (checkpointId: string) => {
+    const result = await window.ide.revertDiffCheckpoint(checkpointId);
+    if (!result.ok || !result.checkpoint) {
+      setLogs((prev) => [`[diff-revert] failed ${checkpointId}: ${result.reason ?? "unknown"}`, ...prev]);
+      return;
+    }
+    const checkpoint = result.checkpoint;
+    if (workspaceRoot && checkpoint.root === workspaceRoot) {
+      const file = await window.ide.readFile(workspaceRoot, checkpoint.path);
+      if (!file.binary && file.content !== null) {
+        setTabs((current) =>
+          current.map((tab) =>
+            tab.path === checkpoint.path
+              ? {
+                  ...tab,
+                  content: file.content ?? "",
+                  originalContent: file.content ?? "",
+                  dirty: false
+                }
+              : tab
+          )
+        );
+      }
+    }
+    setLogs((prev) => [
+      `[diff-revert] restored ${checkpoint.path} from ${checkpointId}`,
+      ...prev
+    ]);
+    await refreshAudit();
+    await refreshDiffCheckpoints();
   };
 
   const runPaletteCommand = async (command: string) => {
@@ -1578,6 +1774,10 @@ export function App() {
                     </div>
                   ) : null}
                   <div className="inline-search" style={{ marginBottom: 10 }}>
+                    <button onClick={() => { void applyPatchQueue(); }}>Apply Patch Queue</button>
+                    <button onClick={() => { void refreshDiffCheckpoints(); }}>Refresh Diff Checkpoints</button>
+                  </div>
+                  <div className="inline-search" style={{ marginBottom: 10 }}>
                     <input
                       value={chunkRationale}
                       onChange={(event) => setChunkRationale(event.target.value)}
@@ -1613,6 +1813,23 @@ export function App() {
                     </div>
                   ))}
                   {patchQueue.length === 0 ? <p className="empty">No patch decisions queued yet.</p> : null}
+
+                  <h4>Diff Checkpoints</h4>
+                  {diffCheckpoints
+                    .filter((record) => record.path === active.path)
+                    .map((record) => (
+                      <div key={record.id} className="checkpoint-card">
+                        <strong>{record.id}</strong>
+                        <code>{record.createdAt}</code>
+                        <code>chunks: {record.appliedChunks.join(", ") || "none"}</code>
+                        <button onClick={() => { void revertDiffFromCheckpoint(record.id); }}>
+                          Revert To Checkpoint
+                        </button>
+                      </div>
+                    ))}
+                  {diffCheckpoints.filter((record) => record.path === active.path).length === 0 ? (
+                    <p className="empty">No diff checkpoints for this file yet.</p>
+                  ) : null}
                 </>
               ) : null}
             </div>
@@ -1684,8 +1901,26 @@ export function App() {
               <div className="inline-search">
                 <input value={terminalInput} onChange={(event) => setTerminalInput(event.target.value)} placeholder="Run command" />
                 <button onClick={runCommand}>Run</button>
+                <button onClick={() => { void startPtySession(); }}>Start PTY Session</button>
+                <button onClick={() => { void stopPtySession(); }} disabled={!terminalSessionId || terminalSessionStatus !== "running"}>
+                  Stop PTY Session
+                </button>
                 <button onClick={() => { void runPipeline(); }}>Run Pipeline</button>
                 <button onClick={() => { void loadTerminalReplay(); }}>Replay</button>
+              </div>
+              <div className="checkpoint-card">
+                <strong>PTY Session</strong>
+                <code>id: {terminalSessionId ?? "none"} | status: {terminalSessionStatus}</code>
+                <div className="inline-search">
+                  <input
+                    value={terminalSessionInput}
+                    onChange={(event) => setTerminalSessionInput(event.target.value)}
+                    placeholder="Send stdin to PTY"
+                  />
+                  <button onClick={() => { void sendPtyInput(); }} disabled={!terminalSessionId || terminalSessionStatus !== "running"}>
+                    Send
+                  </button>
+                </div>
               </div>
               <div className="checkpoint-card">
                 <strong>Pipeline Commands</strong>

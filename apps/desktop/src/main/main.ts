@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { execFile } from "node:child_process";
+import { execFile, spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { promisify } from "node:util";
 import {
   existsSync,
@@ -84,6 +84,55 @@ type PipelineRunResult = {
   artifactPath: string | null;
 };
 
+type TerminalSessionState = "running" | "exited" | "failed" | "stopped";
+
+type TerminalSession = {
+  id: string;
+  root: string;
+  command: string;
+  process: ChildProcessWithoutNullStreams;
+  buffer: string[];
+  status: TerminalSessionState;
+  exitCode: number | null;
+  startedAt: string;
+  endedAt: string | null;
+};
+
+type TerminalSessionStartResult = {
+  sessionId: string | null;
+  status: TerminalSessionState | "blocked" | "denied";
+  policy: PolicyResult;
+  highRisk: CommandRiskAssessment | null;
+  reason: string;
+};
+
+type TerminalSessionSnapshot = {
+  sessionId: string;
+  status: TerminalSessionState;
+  exitCode: number | null;
+  output: string;
+  startedAt: string;
+  endedAt: string | null;
+};
+
+type DiffApplyResult = {
+  ok: boolean;
+  conflict: boolean;
+  checkpointId: string | null;
+  reason: string | null;
+};
+
+type DiffCheckpointRecord = {
+  id: string;
+  createdAt: string;
+  root: string;
+  path: string;
+  baseHash: string;
+  beforeContent: string;
+  afterContent: string;
+  appliedChunks: string[];
+};
+
 type AuditEvent = {
   event_id: string;
   ts: string;
@@ -159,6 +208,7 @@ type ReleaseNotesDraft = {
 };
 
 const watchers = new Map<string, { watcher: FSWatcher; timer: NodeJS.Timeout | null }>();
+const terminalSessions = new Map<string, TerminalSession>();
 const MAX_FILE_BYTES = 1024 * 1024 * 2;
 
 function nowIso(): string {
@@ -185,6 +235,10 @@ function decisionLogPath(): string {
   return join(runtimeDataRoot(), "team", "decisions.json");
 }
 
+function diffCheckpointRoot(): string {
+  return join(runtimeDataRoot(), "diff-checkpoints");
+}
+
 function isWithin(root: string, target: string): boolean {
   const rel = relative(root, target);
   return rel === "" || (!rel.startsWith("..") && !resolve(root, rel).startsWith(".."));
@@ -192,6 +246,10 @@ function isWithin(root: string, target: string): boolean {
 
 function normalizeLf(text: string): string {
   return text.replace(/\r\n/g, "\n");
+}
+
+function hashText(text: string): string {
+  return createHash("sha256").update(text).digest("hex");
 }
 
 function commandPolicy(command: string): PolicyResult {
@@ -1065,6 +1123,262 @@ async function executeCommand(root: string, command: string): Promise<{ exitCode
   }
 }
 
+function evaluateTerminalPolicy(command: string): {
+  policy: PolicyResult;
+  highRisk: CommandRiskAssessment;
+} {
+  const highRisk = detectCommandRisk(command);
+  let policy = commandPolicy(command);
+  if (policy.decision === "allow" && highRisk.requiresApproval) {
+    policy = {
+      decision: "require_approval",
+      reason: highRisk.prompt ?? "high-risk command requires approval"
+    };
+  }
+  return { policy, highRisk };
+}
+
+async function startTerminalSession(
+  root: string,
+  command: string
+): Promise<TerminalSessionStartResult> {
+  const trimmed = command.trim();
+  if (!trimmed) {
+    return {
+      sessionId: null,
+      status: "denied",
+      policy: { decision: "deny", reason: "empty command" },
+      highRisk: null,
+      reason: "command is empty"
+    };
+  }
+
+  const { policy, highRisk } = evaluateTerminalPolicy(trimmed);
+  if (policy.decision === "deny") {
+    return {
+      sessionId: null,
+      status: "denied",
+      policy,
+      highRisk,
+      reason: policy.reason
+    };
+  }
+  if (policy.decision === "require_approval") {
+    return {
+      sessionId: null,
+      status: "blocked",
+      policy,
+      highRisk,
+      reason: policy.reason
+    };
+  }
+
+  const sessionId = `pty-${Date.now()}-${randomUUID().slice(0, 8)}`;
+  const child = spawn("zsh", ["-lc", trimmed], {
+    cwd: root,
+    stdio: ["pipe", "pipe", "pipe"],
+    env: process.env
+  });
+
+  const session: TerminalSession = {
+    id: sessionId,
+    root,
+    command: trimmed,
+    process: child,
+    buffer: [],
+    status: "running",
+    exitCode: null,
+    startedAt: nowIso(),
+    endedAt: null
+  };
+
+  child.stdout.setEncoding("utf8");
+  child.stderr.setEncoding("utf8");
+
+  child.stdout.on("data", (chunk: string | Buffer) => {
+    session.buffer.push(typeof chunk === "string" ? chunk : chunk.toString("utf8"));
+  });
+  child.stderr.on("data", (chunk: string | Buffer) => {
+    session.buffer.push(typeof chunk === "string" ? chunk : chunk.toString("utf8"));
+  });
+  child.on("error", (error) => {
+    session.status = "failed";
+    session.exitCode = 1;
+    session.endedAt = nowIso();
+    session.buffer.push(`\n[session-error] ${error.message}\n`);
+  });
+  child.on("close", (code) => {
+    if (session.status === "stopped") {
+      session.exitCode = code ?? null;
+      session.endedAt = session.endedAt ?? nowIso();
+      return;
+    }
+    session.status = (code ?? 1) === 0 ? "exited" : "failed";
+    session.exitCode = code ?? 1;
+    session.endedAt = nowIso();
+  });
+
+  terminalSessions.set(sessionId, session);
+  return {
+    sessionId,
+    status: "running",
+    policy,
+    highRisk,
+    reason: "session started"
+  };
+}
+
+function readTerminalSession(sessionId: string): TerminalSessionSnapshot | null {
+  const session = terminalSessions.get(sessionId);
+  if (!session) {
+    return null;
+  }
+  const output = session.buffer.join("");
+  session.buffer = [];
+  return {
+    sessionId: session.id,
+    status: session.status,
+    exitCode: session.exitCode,
+    output,
+    startedAt: session.startedAt,
+    endedAt: session.endedAt
+  };
+}
+
+function writeTerminalSession(sessionId: string, input: string): boolean {
+  const session = terminalSessions.get(sessionId);
+  if (!session || session.status !== "running") {
+    return false;
+  }
+  session.process.stdin.write(input);
+  return true;
+}
+
+function stopTerminalSession(sessionId: string): boolean {
+  const session = terminalSessions.get(sessionId);
+  if (!session) {
+    return false;
+  }
+  if (session.status === "running") {
+    session.status = "stopped";
+    session.endedAt = nowIso();
+    session.process.kill("SIGTERM");
+  }
+  return true;
+}
+
+async function writeDiffCheckpoint(record: DiffCheckpointRecord): Promise<void> {
+  await fs.mkdir(diffCheckpointRoot(), { recursive: true });
+  await fs.writeFile(
+    join(diffCheckpointRoot(), `${record.id}.json`),
+    `${JSON.stringify(record, null, 2)}\n`,
+    "utf8"
+  );
+}
+
+async function readDiffCheckpoint(checkpointId: string): Promise<DiffCheckpointRecord | null> {
+  const path = join(diffCheckpointRoot(), `${checkpointId}.json`);
+  if (!existsSync(path)) {
+    return null;
+  }
+  try {
+    const raw = await fs.readFile(path, "utf8");
+    return JSON.parse(raw) as DiffCheckpointRecord;
+  } catch {
+    return null;
+  }
+}
+
+async function listDiffCheckpoints(limit: number): Promise<DiffCheckpointRecord[]> {
+  const root = diffCheckpointRoot();
+  if (!existsSync(root)) {
+    return [];
+  }
+  const entries = await fs.readdir(root, { withFileTypes: true });
+  const records: DiffCheckpointRecord[] = [];
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.endsWith(".json")) {
+      continue;
+    }
+    const loaded = await readDiffCheckpoint(entry.name.replace(/\.json$/i, ""));
+    if (loaded) {
+      records.push(loaded);
+    }
+  }
+  return records
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+    .slice(0, Math.max(1, Math.min(limit, 400)));
+}
+
+async function applyDiffQueue(input: {
+  root: string;
+  path: string;
+  baseContent: string;
+  nextContent: string;
+  appliedChunks: string[];
+}): Promise<DiffApplyResult> {
+  const current = await safeRead(input.root, input.path);
+  if (current.binary || current.content === null) {
+    return {
+      ok: false,
+      conflict: true,
+      checkpointId: null,
+      reason: "binary files are not supported for diff queue apply"
+    };
+  }
+
+  const disk = normalizeLf(current.content);
+  const base = normalizeLf(input.baseContent);
+  if (disk !== base) {
+    return {
+      ok: false,
+      conflict: true,
+      checkpointId: null,
+      reason: "file changed on disk since diff baseline"
+    };
+  }
+
+  await safeWrite(input.root, input.path, input.nextContent);
+  const record: DiffCheckpointRecord = {
+    id: `diff-${Date.now()}-${randomUUID().slice(0, 8)}`,
+    createdAt: nowIso(),
+    root: input.root,
+    path: input.path,
+    baseHash: hashText(base),
+    beforeContent: input.baseContent,
+    afterContent: input.nextContent,
+    appliedChunks: input.appliedChunks
+  };
+  await writeDiffCheckpoint(record);
+  return {
+    ok: true,
+    conflict: false,
+    checkpointId: record.id,
+    reason: null
+  };
+}
+
+async function revertDiffCheckpoint(checkpointId: string): Promise<{
+  ok: boolean;
+  checkpoint: DiffCheckpointRecord | null;
+  reason: string | null;
+}> {
+  const checkpoint = await readDiffCheckpoint(checkpointId);
+  if (!checkpoint) {
+    return {
+      ok: false,
+      checkpoint: null,
+      reason: "checkpoint not found"
+    };
+  }
+  await safeWrite(checkpoint.root, checkpoint.path, checkpoint.beforeContent);
+  return {
+    ok: true,
+    checkpoint,
+    reason: null
+  };
+}
+
 function inferChecksFromCommand(
   command: string,
   exitCode: number | null,
@@ -1593,6 +1907,59 @@ app.whenReady().then(async () => {
     return { ok: true };
   });
 
+  ipcMain.handle(
+    "diff:apply-queue",
+    async (
+      _event,
+      payload: {
+        root: string;
+        path: string;
+        baseContent: string;
+        nextContent: string;
+        appliedChunks: string[];
+      }
+    ): Promise<DiffApplyResult> => {
+      const result = await applyDiffQueue({
+        root: payload.root,
+        path: payload.path,
+        baseContent: payload.baseContent,
+        nextContent: payload.nextContent,
+        appliedChunks: payload.appliedChunks ?? []
+      });
+      await appendAuditEvent({
+        action: "diff.apply_queue",
+        target: payload.path,
+        decision: result.ok ? "executed" : result.conflict ? "error" : "deny",
+        reason: result.ok ? "diff queue applied" : (result.reason ?? "diff queue apply failed"),
+        metadata: {
+          root: payload.root,
+          checkpoint_id: result.checkpointId,
+          chunk_count: payload.appliedChunks?.length ?? 0
+        }
+      });
+      return result;
+    }
+  );
+
+  ipcMain.handle("diff:list-checkpoints", async (_event, limit = 80) => {
+    return listDiffCheckpoints(Math.max(1, Math.min(300, Number(limit) || 80)));
+  });
+
+  ipcMain.handle("diff:revert-checkpoint", async (_event, checkpointId: string) => {
+    const result = await revertDiffCheckpoint(checkpointId);
+    await appendAuditEvent({
+      action: "diff.revert_checkpoint",
+      target: checkpointId,
+      decision: result.ok ? "executed" : "error",
+      reason: result.ok ? "diff checkpoint reverted" : (result.reason ?? "checkpoint revert failed"),
+      metadata: {
+        path: result.checkpoint?.path ?? null,
+        root: result.checkpoint?.root ?? null
+      }
+    });
+    return result;
+  });
+
   ipcMain.handle("file:create", async (_event, root: string, relPath: string, isDirectory: boolean) => {
     const absolute = resolve(root, relPath);
     if (!isWithin(root, absolute)) {
@@ -1657,15 +2024,61 @@ app.whenReady().then(async () => {
     return [...map.entries()].map(([file, status]) => ({ file, status }));
   });
 
-  ipcMain.handle("terminal:run", async (_event, root: string, command: string): Promise<TerminalResult> => {
-    const highRisk = detectCommandRisk(command);
-    let policy = commandPolicy(command);
-    if (policy.decision === "allow" && highRisk.requiresApproval) {
-      policy = {
-        decision: "require_approval",
-        reason: highRisk.prompt ?? "high-risk command requires approval"
-      };
+  ipcMain.handle(
+    "terminal:session:start",
+    async (_event, root: string, command: string): Promise<TerminalSessionStartResult> => {
+      const result = await startTerminalSession(root, command);
+      await appendAuditEvent({
+        action: "terminal.session.start",
+        target: command,
+        decision:
+          result.status === "running"
+            ? "executed"
+            : result.status === "blocked"
+              ? "require_approval"
+              : "deny",
+        reason: result.reason,
+        metadata: {
+          root,
+          session_id: result.sessionId,
+          high_risk: result.highRisk?.categories ?? []
+        }
+      });
+      return result;
     }
+  );
+
+  ipcMain.handle("terminal:session:read", async (_event, sessionId: string) => {
+    return readTerminalSession(sessionId);
+  });
+
+  ipcMain.handle("terminal:session:write", async (_event, sessionId: string, input: string) => {
+    const ok = writeTerminalSession(sessionId, input);
+    if (ok) {
+      await appendAuditEvent({
+        action: "terminal.session.write",
+        target: sessionId,
+        decision: "executed",
+        reason: "stdin forwarded to session",
+        metadata: { bytes: input.length }
+      });
+    }
+    return { ok };
+  });
+
+  ipcMain.handle("terminal:session:stop", async (_event, sessionId: string) => {
+    const ok = stopTerminalSession(sessionId);
+    await appendAuditEvent({
+      action: "terminal.session.stop",
+      target: sessionId,
+      decision: ok ? "executed" : "error",
+      reason: ok ? "session stopped" : "session not found"
+    });
+    return { ok };
+  });
+
+  ipcMain.handle("terminal:run", async (_event, root: string, command: string): Promise<TerminalResult> => {
+    const { highRisk, policy } = evaluateTerminalPolicy(command);
 
     if (policy.decision === "deny") {
       await appendAuditEvent({
@@ -1773,7 +2186,7 @@ app.whenReady().then(async () => {
   });
 
   ipcMain.handle("terminal:run-approved", async (_event, root: string, command: string): Promise<TerminalResult> => {
-    const highRisk = detectCommandRisk(command);
+    const { highRisk } = evaluateTerminalPolicy(command);
     const policy = commandPolicy(command);
     if (policy.decision === "deny") {
       await appendAuditEvent({
@@ -2105,6 +2518,14 @@ app.on("window-all-closed", () => {
   for (const root of watchers.keys()) {
     stopWatcher(root);
   }
+  for (const session of terminalSessions.values()) {
+    if (session.status === "running") {
+      session.status = "stopped";
+      session.endedAt = nowIso();
+      session.process.kill("SIGTERM");
+    }
+  }
+  terminalSessions.clear();
   if (process.platform !== "darwin") {
     app.quit();
   }
