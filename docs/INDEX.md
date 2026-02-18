@@ -28,6 +28,8 @@ This repository stores the full implementation plan, prompts, contracts, milesto
 - [Desktop Release Pipeline](./governance/RELEASE_PIPELINE.md)
 - [Beta Program and Acceptance](./governance/BETA_PROGRAM_AND_ACCEPTANCE.md)
 - [GA Signoff Checklist](./governance/GA_SIGNOFF_CHECKLIST.md)
+- [GA Signoff Record v0.1.0](./governance/GA_SIGNOFF_RECORD_2026-02-18_v0.1.0.md)
+- [Release Notes v0.1.0](./governance/RELEASE_NOTES_v0.1.0.md)
 - [Runbook](../RUNBOOK.md)
 - [Roadmap](./ROADMAP.md)
 
