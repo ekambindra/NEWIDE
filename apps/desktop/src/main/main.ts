@@ -9,6 +9,7 @@ import {
   type FSWatcher
 } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { app, BrowserWindow, dialog, ipcMain } from "electron";
 import ignore from "ignore";
 import { AgentRuntime } from "@ide/agent-runtime";
@@ -79,6 +80,38 @@ import {
 } from "@ide/benchmark";
 
 const execFileAsync = promisify(execFile);
+const MAIN_DIST_DIR = dirname(fileURLToPath(import.meta.url));
+
+function resolveFirstExisting(candidates: string[]): string {
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) {
+      return candidate;
+    }
+  }
+  return candidates[0] ?? "";
+}
+
+function resolvePreloadPath(): string {
+  return resolveFirstExisting([
+    join(MAIN_DIST_DIR, "preload.cjs"),
+    join(MAIN_DIST_DIR, "preload.js"),
+    join(app.getAppPath(), "dist/main/preload.cjs"),
+    join(app.getAppPath(), "dist/main/preload.js"),
+    join(process.cwd(), "dist/main/preload.cjs"),
+    join(process.cwd(), "dist/main/preload.js"),
+    join(process.cwd(), "apps/desktop/dist/main/preload.cjs"),
+    join(process.cwd(), "apps/desktop/dist/main/preload.js")
+  ]);
+}
+
+function resolveRendererIndexPath(): string {
+  return resolveFirstExisting([
+    join(MAIN_DIST_DIR, "../renderer/index.html"),
+    join(app.getAppPath(), "dist/renderer/index.html"),
+    join(process.cwd(), "dist/renderer/index.html"),
+    join(process.cwd(), "apps/desktop/dist/renderer/index.html")
+  ]);
+}
 
 type TreeNode = {
   name: string;
@@ -2519,6 +2552,7 @@ async function replayTerminal(limit: number): Promise<Array<{ runId: string; com
 }
 
 async function createWindow(): Promise<void> {
+  const preloadPath = resolvePreloadPath();
   const win = new BrowserWindow({
     width: 1600,
     height: 980,
@@ -2526,19 +2560,34 @@ async function createWindow(): Promise<void> {
     minHeight: 700,
     titleBarStyle: "hiddenInset",
     webPreferences: {
-      preload: join(app.getAppPath(), "dist/main/preload.js"),
+      preload: preloadPath,
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true
     }
   });
 
+  win.webContents.on("preload-error", (_event, failedPreloadPath, error) => {
+    process.stderr.write(`[preload-error] path=${failedPreloadPath} message=${error.message}\n`);
+  });
+
   const devUrl = process.env.VITE_DEV_SERVER_URL;
   if (devUrl) {
     await win.loadURL(devUrl);
   } else {
-    await win.loadFile(join(app.getAppPath(), "dist/renderer/index.html"));
+    await win.loadFile(resolveRendererIndexPath());
   }
+
+  void win.webContents
+    .executeJavaScript("typeof window.ide !== 'undefined'")
+    .then((hasIdeApi) => {
+      if (!hasIdeApi) {
+        process.stderr.write("[startup] preload api missing after initial load\n");
+      }
+    })
+    .catch((error) => {
+      process.stderr.write(`[startup] failed preload probe: ${error instanceof Error ? error.message : String(error)}\n`);
+    });
 }
 
 app.whenReady().then(async () => {

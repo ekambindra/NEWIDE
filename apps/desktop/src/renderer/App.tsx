@@ -923,6 +923,12 @@ export function App() {
   const [benchmarkSeed, setBenchmarkSeed] = useState("1337");
   const [benchmarkRunning, setBenchmarkRunning] = useState(false);
   const [autoSaveMode, setAutoSaveMode] = useState<"manual" | "afterDelay" | "onBlur">("manual");
+  const [showLeftPane, setShowLeftPane] = useState(false);
+  const [showRightPane, setShowRightPane] = useState(false);
+  const [showBottomPane, setShowBottomPane] = useState(false);
+  const [ideReady, setIdeReady] = useState(
+    () => typeof window !== "undefined" && typeof window.ide !== "undefined"
+  );
   const dragRef = useRef<null | "left" | "right" | "bottom">(null);
   const sessionHydratedRef = useRef(false);
 
@@ -941,6 +947,43 @@ export function App() {
     [active]
   );
   const accessibilityStatus = useMemo(() => logs[0] ?? "Atlas Meridian ready", [logs]);
+
+  const toggleLeftFeature = (tab: LeftTab) => {
+    if (showLeftPane && leftTab === tab) {
+      setShowLeftPane(false);
+      return;
+    }
+    setLeftTab(tab);
+    setShowLeftPane(true);
+  };
+
+  const toggleRightFeature = (tab: PanelTab) => {
+    if (showRightPane && panelTab === tab) {
+      setShowRightPane(false);
+      return;
+    }
+    setPanelTab(tab);
+    setShowRightPane(true);
+  };
+
+  const toggleBottomFeature = (tab: BottomTab) => {
+    if (showBottomPane && bottomTab === tab) {
+      setShowBottomPane(false);
+      return;
+    }
+    setBottomTab(tab);
+    setShowBottomPane(true);
+  };
+
+  const focusEditorOnly = () => {
+    setShowLeftPane(false);
+    setShowRightPane(false);
+    setShowBottomPane(false);
+  };
+
+  const retryPreloadBridge = () => {
+    setIdeReady(typeof window !== "undefined" && typeof window.ide !== "undefined");
+  };
 
   const refreshTree = async (root: string) => {
     const [nodes, statuses] = await Promise.all([window.ide.getTree(root), window.ide.gitStatus(root)]);
@@ -1037,6 +1080,24 @@ export function App() {
   };
 
   useEffect(() => {
+    if (ideReady) {
+      return;
+    }
+    const interval = window.setInterval(() => {
+      if (typeof window.ide !== "undefined") {
+        setIdeReady(true);
+      }
+    }, 180);
+    const timeout = window.setTimeout(() => {
+      window.clearInterval(interval);
+    }, 9000);
+    return () => {
+      window.clearInterval(interval);
+      window.clearTimeout(timeout);
+    };
+  }, [ideReady]);
+
+  useEffect(() => {
     const keydown = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
         event.preventDefault();
@@ -1064,6 +1125,9 @@ export function App() {
   }, [tabs]);
 
   useEffect(() => {
+    if (!ideReady) {
+      return;
+    }
     if (!workspaceRoot) {
       return;
     }
@@ -1088,9 +1152,12 @@ export function App() {
       unsubscribe();
       void window.ide.stopWatch(workspaceRoot);
     };
-  }, [workspaceRoot]);
+  }, [workspaceRoot, ideReady]);
 
   useEffect(() => {
+    if (!ideReady) {
+      return;
+    }
     void refreshCheckpoints();
     void refreshDiffCheckpoints();
     void refreshIndexDiagnostics();
@@ -1100,9 +1167,12 @@ export function App() {
     void refreshEnterpriseSettings();
     void refreshReleaseChannel();
     void refreshBenchmarkDashboard();
-  }, []);
+  }, [ideReady]);
 
   useEffect(() => {
+    if (!ideReady) {
+      return;
+    }
     if (sessionHydratedRef.current) {
       return;
     }
@@ -1181,7 +1251,7 @@ export function App() {
       setSecondTab(restoredSecond);
       setLogs((prev) => [`[session] restored ${restoredTabs.length} tabs`, ...prev].slice(0, 200));
     })();
-  }, []);
+  }, [ideReady]);
 
   useEffect(() => {
     if (!sessionHydratedRef.current) {
@@ -1231,6 +1301,9 @@ export function App() {
   }, [autoSaveMode, workspaceRoot, active?.path, active?.content, active?.dirty]);
 
   useEffect(() => {
+    if (!ideReady) {
+      return;
+    }
     if (!terminalSessionId || terminalSessionStatus !== "running") {
       return;
     }
@@ -1254,7 +1327,7 @@ export function App() {
       })();
     }, 300);
     return () => clearInterval(interval);
-  }, [terminalSessionId, terminalSessionStatus]);
+  }, [terminalSessionId, terminalSessionStatus, ideReady]);
 
   useEffect(() => {
     const onMove = (event: MouseEvent) => {
@@ -1296,6 +1369,8 @@ export function App() {
     setSecondTab(null);
     setSearchHits([]);
     setWorkspaceRoot(root);
+    setShowLeftPane(true);
+    setLeftTab("files");
     setLogs((prev) => [`[workspace] opened ${root}`, ...prev]);
   };
 
@@ -1352,6 +1427,7 @@ export function App() {
     const hits = await window.ide.searchProject(workspaceRoot, searchText);
     setSearchHits(hits);
     setLeftTab("search");
+    setShowLeftPane(true);
   };
 
   const runCommand = async () => {
@@ -1366,14 +1442,17 @@ export function App() {
       setTestSummaries((prev) => [result.parsedTest as ParsedTestSummary, ...prev].slice(0, 80));
       setTestOutput((prev) => [`${result.stdout}${result.stderr}`.trim(), ...prev].slice(0, 100));
       setBottomTab("tests");
+      setShowBottomPane(true);
     } else if (/test/.test(result.command)) {
       setTestOutput((prev) => [`${result.stdout}${result.stderr}`.trim(), ...prev].slice(0, 100));
       setBottomTab("tests");
+      setShowBottomPane(true);
     }
     if (result.policy.decision === "require_approval") {
       setPendingApprovalCommand(result.command);
       setPendingApprovalReason(result.highRisk?.prompt ?? result.policy.reason);
       setPanelTab("plan");
+      setShowRightPane(true);
     }
     if (result.policy.decision !== "require_approval") {
       setPendingApprovalReason(null);
@@ -1397,6 +1476,7 @@ export function App() {
       setTestSummaries((prev) => [result.parsedTest as ParsedTestSummary, ...prev].slice(0, 80));
       setTestOutput((prev) => [`${result.stdout}${result.stderr}`.trim(), ...prev].slice(0, 100));
       setBottomTab("tests");
+      setShowBottomPane(true);
     }
     if (result.artifactPath) {
       await refreshCheckpoints();
@@ -1416,6 +1496,8 @@ export function App() {
       setTerminalSessionId(result.sessionId);
       setTerminalSessionStatus("running");
       setTerminalOutput((prev) => [`$ [pty] ${terminalInput.trim()}`, ...prev].slice(0, 400));
+      setBottomTab("terminal");
+      setShowBottomPane(true);
       setLogs((prev) => [`[pty] started ${result.sessionId}`, ...prev]);
       return;
     }
@@ -1424,6 +1506,7 @@ export function App() {
       setPendingApprovalCommand(terminalInput.trim());
       setPendingApprovalReason(result.highRisk?.prompt ?? result.reason);
       setPanelTab("plan");
+      setShowRightPane(true);
       setLogs((prev) => [`[pty] blocked ${result.reason}`, ...prev]);
       return;
     }
@@ -1472,6 +1555,8 @@ export function App() {
       `[pipeline] ${result.status} lint=${result.checks.lint} typecheck=${result.checks.typecheck} test=${result.checks.test} build=${result.checks.build}`,
       ...prev
     ]);
+    setBottomTab("terminal");
+    setShowBottomPane(true);
 
     const parsed = result.stages
       .map((stage) => stage.parsedTest)
@@ -1486,6 +1571,7 @@ export function App() {
         ...prev
       ].slice(0, 100));
       setBottomTab("tests");
+      setShowBottomPane(true);
     }
 
     if (result.blockedStage) {
@@ -1493,6 +1579,7 @@ export function App() {
       setPendingApprovalCommand(blocked?.command ?? null);
       setPendingApprovalReason(blocked?.highRisk?.prompt ?? blocked?.policy.reason ?? "pipeline blocked");
       setPanelTab("plan");
+      setShowRightPane(true);
     } else {
       setPendingApprovalReason(null);
     }
@@ -1755,6 +1842,7 @@ export function App() {
       await runCommand();
     } else if (command === "Focus Agent") {
       setPanelTab("agent");
+      setShowRightPane(true);
     } else if (command === "Export Audit") {
       const result = await window.ide.exportAudit();
       setLogs((prev) => [`[audit-export] ${result.path} (${result.count} events)`, ...prev]);
@@ -1770,6 +1858,8 @@ export function App() {
   const loadTerminalReplay = async () => {
     const replay = await window.ide.replayTerminal(20);
     setTerminalReplay(replay);
+    setBottomTab("terminal");
+    setShowBottomPane(true);
     setLogs((prev) => [`[replay] loaded ${replay.length} terminal runs`, ...prev]);
   };
 
@@ -1788,6 +1878,7 @@ export function App() {
     });
     setMultiAgentSummary(summary);
     setPanelTab("agent");
+    setShowRightPane(true);
     await refreshCheckpoints();
     await refreshAudit();
     setLogs((prev) => [
@@ -1848,6 +1939,7 @@ export function App() {
         ...prev
       ]);
       setPanelTab("plan");
+      setShowRightPane(true);
     } catch (error) {
       const message = error instanceof Error ? error.message : "multi-file refactor failed";
       setLogs((prev) => [`[multi-refactor] error: ${message}`, ...prev]);
@@ -2224,13 +2316,31 @@ export function App() {
   };
 
   const breadcrumbs = activeTab ? activeTab.split("/") : [];
+  const leftWidth = showLeftPane ? layout.leftWidth : 0;
+  const rightWidth = showRightPane ? layout.rightWidth : 0;
+  const bottomHeight = showBottomPane ? layout.bottomHeight : 0;
+  const leftSplitterWidth = showLeftPane ? 6 : 0;
+  const rightSplitterWidth = showRightPane ? 6 : 0;
+  const bottomSplitterHeight = showBottomPane ? 6 : 0;
 
-  if (typeof window.ide === "undefined") {
-    throw new Error("preload api missing");
+  if (!ideReady) {
+    return (
+      <div className="app-crash-fallback">
+        <div className="app-crash-card">
+          <h1>Atlas Meridian is waiting for desktop preload</h1>
+          <p>The UI will become available as soon as the secure bridge is ready.</p>
+          <code>preload api pending</code>
+          <div className="inline-search">
+            <button onClick={retryPreloadBridge}>Retry Bridge Check</button>
+            <button onClick={() => window.location.reload()}>Reload UI</button>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   return (
-    <div className="app-shell" aria-label="Atlas Meridian">
+    <div className="app-shell simple-ui" aria-label="Atlas Meridian">
       <a className="skip-link" href="#main-content">Skip to main content</a>
       <div className="sr-only" aria-live="polite" aria-atomic="true">{accessibilityStatus}</div>
       <header className="topbar">
@@ -2242,6 +2352,66 @@ export function App() {
           <button onClick={openWorkspace} aria-label="Open workspace folder">Open Workspace</button>
           <button onClick={() => setCommandPaletteOpen(true)} aria-haspopup="dialog" aria-expanded={commandPaletteOpen}>
             Command Palette
+          </button>
+          <button
+            className={!showLeftPane && !showRightPane && !showBottomPane ? "active" : ""}
+            onClick={focusEditorOnly}
+          >
+            Editor
+          </button>
+          <button
+            className={showLeftPane && leftTab === "files" ? "active" : ""}
+            onClick={() => toggleLeftFeature("files")}
+          >
+            Files
+          </button>
+          <button
+            className={showLeftPane && leftTab === "search" ? "active" : ""}
+            onClick={() => toggleLeftFeature("search")}
+          >
+            Search
+          </button>
+          <button
+            className={showRightPane && panelTab === "agent" ? "active" : ""}
+            onClick={() => toggleRightFeature("agent")}
+          >
+            Agent
+          </button>
+          <button
+            className={showRightPane && panelTab === "plan" ? "active" : ""}
+            onClick={() => toggleRightFeature("plan")}
+          >
+            Plan
+          </button>
+          <button
+            className={showRightPane && panelTab === "diff" ? "active" : ""}
+            onClick={() => toggleRightFeature("diff")}
+          >
+            Diff
+          </button>
+          <button
+            className={showRightPane && panelTab === "checkpoints" ? "active" : ""}
+            onClick={() => toggleRightFeature("checkpoints")}
+          >
+            Checkpoints
+          </button>
+          <button
+            className={showBottomPane && bottomTab === "terminal" ? "active" : ""}
+            onClick={() => toggleBottomFeature("terminal")}
+          >
+            Terminal
+          </button>
+          <button
+            className={showBottomPane && bottomTab === "tests" ? "active" : ""}
+            onClick={() => toggleBottomFeature("tests")}
+          >
+            Tests
+          </button>
+          <button
+            className={showBottomPane && bottomTab === "logs" ? "active" : ""}
+            onClick={() => toggleBottomFeature("logs")}
+          >
+            Logs
           </button>
           <button onClick={() => setSplitEnabled((flag) => !flag)}>{splitEnabled ? "Single" : "Split"} Editor</button>
           <label className="sr-only" htmlFor="autosave-mode">Auto-save mode</label>
@@ -2264,11 +2434,11 @@ export function App() {
         role="main"
         aria-label="Atlas Meridian workspace"
         style={{
-        gridTemplateColumns: `${layout.leftWidth}px 6px minmax(420px, 1fr) 6px ${layout.rightWidth}px`,
-        gridTemplateRows: `minmax(280px, 1fr) 6px ${layout.bottomHeight}px`
+        gridTemplateColumns: `${leftWidth}px ${leftSplitterWidth}px minmax(420px, 1fr) ${rightSplitterWidth}px ${rightWidth}px`,
+        gridTemplateRows: `minmax(280px, 1fr) ${bottomSplitterHeight}px ${bottomHeight}px`
         }}
       >
-        <aside className="pane pane-left">
+        <aside className="pane pane-left" style={{ display: showLeftPane ? "flex" : "none" }}>
           <div className="tab-row" role="tablist" aria-label="Left panel tabs">
             {leftTabs.map((tab) => (
               <button
@@ -2276,11 +2446,12 @@ export function App() {
                 role="tab"
                 aria-selected={leftTab === tab}
                 className={leftTab === tab ? "active" : ""}
-                onClick={() => setLeftTab(tab)}
+                onClick={() => toggleLeftFeature(tab)}
               >
                 {tab}
               </button>
             ))}
+            <button onClick={() => setShowLeftPane(false)}>Hide</button>
           </div>
           {leftTab === "files" ? (
             <div className="left-content">
@@ -2309,7 +2480,13 @@ export function App() {
           )}
         </aside>
 
-        <div className="splitter vertical" onMouseDown={() => { dragRef.current = "left"; }} role="separator" aria-label="Resize left panel" />
+        <div
+          className="splitter vertical"
+          style={{ display: showLeftPane ? "block" : "none" }}
+          onMouseDown={() => { dragRef.current = "left"; }}
+          role="separator"
+          aria-label="Resize left panel"
+        />
 
         <section className="pane pane-editor">
           <div className="breadcrumbs">
@@ -2416,9 +2593,15 @@ export function App() {
           ) : null}
         </section>
 
-        <div className="splitter vertical" onMouseDown={() => { dragRef.current = "right"; }} role="separator" aria-label="Resize right panel" />
+        <div
+          className="splitter vertical"
+          style={{ display: showRightPane ? "block" : "none" }}
+          onMouseDown={() => { dragRef.current = "right"; }}
+          role="separator"
+          aria-label="Resize right panel"
+        />
 
-        <aside className="pane pane-right">
+        <aside className="pane pane-right" style={{ display: showRightPane ? "flex" : "none" }}>
           <div className="tab-row" role="tablist" aria-label="Right panel tabs">
             {panelTabs.map((tab) => (
               <button
@@ -2426,11 +2609,12 @@ export function App() {
                 role="tab"
                 aria-selected={panelTab === tab}
                 className={panelTab === tab ? "active" : ""}
-                onClick={() => setPanelTab(tab)}
+                onClick={() => toggleRightFeature(tab)}
               >
                 {tab}
               </button>
             ))}
+            <button onClick={() => setShowRightPane(false)}>Hide</button>
           </div>
           {panelTab === "agent" ? (
             <div className="panel-scroll">
@@ -3430,7 +3614,7 @@ export function App() {
           ) : null}
         </aside>
 
-        <section className="pane pane-bottom" style={{ gridColumn: "1 / -1" }}>
+        <section className="pane pane-bottom" style={{ gridColumn: "1 / -1", display: showBottomPane ? "flex" : "none" }}>
           <div className="tab-row" role="tablist" aria-label="Bottom panel tabs">
             {bottomTabs.map((tab) => (
               <button
@@ -3438,11 +3622,12 @@ export function App() {
                 role="tab"
                 aria-selected={bottomTab === tab}
                 className={bottomTab === tab ? "active" : ""}
-                onClick={() => setBottomTab(tab)}
+                onClick={() => toggleBottomFeature(tab)}
               >
                 {tab}
               </button>
             ))}
+            <button onClick={() => setShowBottomPane(false)}>Hide</button>
           </div>
           {bottomTab === "terminal" ? (
             <div className="terminal-pane">
@@ -3536,7 +3721,13 @@ export function App() {
           ) : null}
         </section>
 
-        <div className="splitter horizontal" onMouseDown={() => { dragRef.current = "bottom"; }} role="separator" aria-label="Resize bottom panel" />
+        <div
+          className="splitter horizontal"
+          style={{ display: showBottomPane ? "block" : "none" }}
+          onMouseDown={() => { dragRef.current = "bottom"; }}
+          role="separator"
+          aria-label="Resize bottom panel"
+        />
       </div>
 
       {commandPaletteOpen ? (

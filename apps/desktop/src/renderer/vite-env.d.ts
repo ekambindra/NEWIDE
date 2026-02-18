@@ -2,7 +2,7 @@
 
 declare global {
   interface Window {
-    ide: import("../main/preload").PreloadApi;
+    ide: import("../main/preload.cts").PreloadApi;
   }
 }
 

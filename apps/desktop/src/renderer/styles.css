@@ -145,6 +145,36 @@ textarea {
   gap: 8px;
 }
 
+.header-actions button.active {
+  border-color: var(--accent);
+  background: rgba(61, 212, 164, 0.14);
+}
+
+.simple-ui .topbar {
+  height: auto;
+  min-height: 52px;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.simple-ui .header-actions {
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.simple-ui .header-actions button {
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: 12px;
+}
+
+.simple-ui .pane-left .tab-row,
+.simple-ui .pane-right .tab-row,
+.simple-ui .pane-bottom .tab-row {
+  display: none;
+}
+
 .main-grid {
   display: grid;
   flex: 1;

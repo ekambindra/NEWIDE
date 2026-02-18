@@ -7,9 +7,11 @@
   "type": "module",
   "main": "dist/main/main.js",
   "scripts": {
-    "dev": "concurrently -k \"npm:dev:main\" \"npm:dev:renderer\" \"npm:dev:electron\"",
+    "dev": "npm run dev:deps && npm run dev:port-check && concurrently -k \"npm:dev:main\" \"npm:dev:renderer\" \"npm:dev:electron\"",
+    "dev:deps": "npm run build --workspace @ide/shared && npm run build --workspace @ide/policy-engine && npm run build --workspace @ide/indexer && npm run build --workspace @ide/agent-runtime && npm run build --workspace @ide/benchmark",
+    "dev:port-check": "node -e \"const net=require('node:net');const server=net.createServer();server.once('error',()=>{console.error('Port 5173 is already in use. Stop existing Atlas Meridian dev sessions and retry.');process.exit(1);});server.once('listening',()=>server.close(()=>process.exit(0)));server.listen(5173,'127.0.0.1');\"",
     "dev:main": "tsc -p tsconfig.main.json --watch --preserveWatchOutput",
-    "dev:renderer": "vite",
+    "dev:renderer": "vite --host 127.0.0.1 --port 5173 --strictPort",
     "dev:electron": "wait-on dist/main/main.js tcp:5173 && cross-env VITE_DEV_SERVER_URL=http://localhost:5173 electron .",
     "build": "npm run build:main && npm run build:renderer",
     "build:main": "tsc -p tsconfig.main.json",
