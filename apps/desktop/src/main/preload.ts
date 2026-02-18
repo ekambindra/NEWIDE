@@ -232,6 +232,32 @@ type GreenPipelineReport = {
   meetsTarget: boolean;
 };
 
+type AuthRole = "viewer" | "developer" | "admin" | "security_admin";
+
+type SsoProvider = {
+  id: string;
+  name: string;
+  protocol: "oidc" | "saml";
+  issuer: string;
+  entrypoint: string;
+  clientId: string;
+  enabled: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
+type AuthSession = {
+  sessionId: string;
+  userId: string;
+  email: string;
+  displayName: string;
+  providerId: string;
+  protocol: "oidc" | "saml";
+  roles: AuthRole[];
+  issuedAt: string;
+  expiresAt: string;
+};
+
 type ProjectBuilderResult = {
   runId: string;
   template: "node_microservices_postgres";
@@ -473,6 +499,25 @@ const api = {
     allowSensitive?: boolean;
     maxFiles?: number;
   }): Promise<MultiFileRefactorResult> => ipcRenderer.invoke("auto:multi-refactor", payload),
+  listAuthProviders: (): Promise<SsoProvider[]> => ipcRenderer.invoke("auth:providers:list"),
+  listAuthRoles: (): Promise<AuthRole[]> => ipcRenderer.invoke("auth:roles:list"),
+  getAuthSession: (): Promise<AuthSession | null> => ipcRenderer.invoke("auth:session:get"),
+  loginAuthSession: (payload: {
+    providerId: string;
+    email: string;
+    displayName?: string;
+    roles?: AuthRole[];
+  }): Promise<AuthSession> => ipcRenderer.invoke("auth:session:login", payload),
+  logoutAuthSession: (): Promise<{ ok: boolean }> => ipcRenderer.invoke("auth:session:logout"),
+  upsertAuthProvider: (payload: {
+    id: string;
+    name: string;
+    protocol: "oidc" | "saml";
+    issuer: string;
+    entrypoint: string;
+    clientId?: string;
+    enabled?: boolean;
+  }): Promise<SsoProvider> => ipcRenderer.invoke("auth:providers:upsert", payload),
   runMultiAgentTask: (
     payload: { goal: string; acceptanceCriteria: string[]; agentCount: number }
   ): Promise<MultiAgentSummary> => ipcRenderer.invoke("agent:run-multi", payload),

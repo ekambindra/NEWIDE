@@ -2,8 +2,8 @@
 
 ## Current Completion
 
-- Completed features: 133/170
-- Completion percentage: 78.2%
+- Completed features: 136/170
+- Completion percentage: 80.0%
 
 ## Latest Implemented Increments
 
@@ -58,6 +58,9 @@
 49. Multi-file refactor mode with preview/apply flows, sensitive-path blocking, checkpoint artifacts, and call-graph/rename-impact grounding links (AUTO-002).
 50. Secret detection gate added before diff patch apply with rule-based findings and explicit blocking when potential credentials are introduced (ENT-008).
 51. Audit/event log redaction layer added for secret-like values in targets/reasons/metadata with recursive sanitization and deterministic checksums over redacted payloads (ENT-009).
+52. OIDC SSO provider support with persistent provider registry and interactive login flow in desktop UI (ENT-001).
+53. SAML SSO provider support with configurable provider entries and protocol-aware session establishment (ENT-002).
+54. RBAC baseline with `viewer/developer/admin/security_admin` roles and runtime enforcement on high-impact actions (file writes, diff apply, approved terminal runs, project builder, multi-refactor, audit export, provider management) (ENT-003).
 
 ## Verification Commands
 

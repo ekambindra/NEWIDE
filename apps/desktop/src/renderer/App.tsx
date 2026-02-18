@@ -338,6 +338,32 @@ type GreenPipelineReport = {
   meetsTarget: boolean;
 };
 
+type AuthRole = "viewer" | "developer" | "admin" | "security_admin";
+
+type SsoProvider = {
+  id: string;
+  name: string;
+  protocol: "oidc" | "saml";
+  issuer: string;
+  entrypoint: string;
+  clientId: string;
+  enabled: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
+type AuthSession = {
+  sessionId: string;
+  userId: string;
+  email: string;
+  displayName: string;
+  providerId: string;
+  protocol: "oidc" | "saml";
+  roles: AuthRole[];
+  issuedAt: string;
+  expiresAt: string;
+};
+
 type ProjectBuilderResult = {
   runId: string;
   template: "node_microservices_postgres";
@@ -685,6 +711,22 @@ export function App() {
   const [refactorAllowSensitive, setRefactorAllowSensitive] = useState(false);
   const [refactorRunning, setRefactorRunning] = useState(false);
   const [refactorResult, setRefactorResult] = useState<MultiFileRefactorResult | null>(null);
+  const [authSession, setAuthSession] = useState<AuthSession | null>(null);
+  const [authProviders, setAuthProviders] = useState<SsoProvider[]>([]);
+  const [authRoles, setAuthRoles] = useState<AuthRole[]>([]);
+  const [authProviderId, setAuthProviderId] = useState("oidc-default");
+  const [authEmail, setAuthEmail] = useState("developer@atlasmeridian.local");
+  const [authDisplayName, setAuthDisplayName] = useState("Local Developer");
+  const [authSelectedRoles, setAuthSelectedRoles] = useState<AuthRole[]>(["developer"]);
+  const [providerEditor, setProviderEditor] = useState({
+    id: "oidc-corp",
+    name: "Corp OIDC",
+    protocol: "oidc" as "oidc" | "saml",
+    issuer: "https://id.corp.local",
+    entrypoint: "https://id.corp.local/auth",
+    clientId: "atlas-corp",
+    enabled: true
+  });
   const [autoSaveMode, setAutoSaveMode] = useState<"manual" | "afterDelay" | "onBlur">("manual");
   const dragRef = useRef<null | "left" | "right" | "bottom">(null);
 
@@ -752,6 +794,20 @@ export function App() {
     setDecisionLogs(decisions);
   };
 
+  const refreshAuthState = async () => {
+    const [providers, roles, session] = await Promise.all([
+      window.ide.listAuthProviders(),
+      window.ide.listAuthRoles(),
+      window.ide.getAuthSession()
+    ]);
+    setAuthProviders(providers);
+    setAuthRoles(roles);
+    setAuthSession(session);
+    if (providers.length > 0 && !providers.some((provider) => provider.id === authProviderId)) {
+      setAuthProviderId(providers[0]?.id ?? "oidc-default");
+    }
+  };
+
   useEffect(() => {
     const keydown = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
@@ -790,6 +846,7 @@ export function App() {
     void refreshDiffCheckpoints();
     void refreshIndexDiagnostics();
     void refreshTeamData();
+    void refreshAuthState();
     void window.ide.startWatch(workspaceRoot);
     const unsubscribe = window.ide.onWorkspaceChanged(async () => {
       await refreshTree(workspaceRoot);
@@ -808,6 +865,7 @@ export function App() {
     void refreshIndexDiagnostics();
     void refreshAudit();
     void refreshTeamData();
+    void refreshAuthState();
   }, []);
 
   useEffect(() => {
@@ -1443,6 +1501,60 @@ export function App() {
     }
   };
 
+  const loginAuth = async () => {
+    if (!authProviderId.trim() || !authEmail.trim()) {
+      return;
+    }
+    try {
+      const session = await window.ide.loginAuthSession({
+        providerId: authProviderId.trim(),
+        email: authEmail.trim(),
+        displayName: authDisplayName.trim() || undefined,
+        roles: authSelectedRoles
+      });
+      setAuthSession(session);
+      await refreshAudit();
+      setLogs((prev) => [
+        `[auth] logged in ${session.email} roles=${session.roles.join(",")}`,
+        ...prev
+      ]);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "login failed";
+      setLogs((prev) => [`[auth] login error: ${message}`, ...prev]);
+    }
+  };
+
+  const logoutAuth = async () => {
+    await window.ide.logoutAuthSession();
+    setAuthSession(null);
+    await refreshAudit();
+    setLogs((prev) => ["[auth] logged out", ...prev]);
+  };
+
+  const upsertProvider = async () => {
+    try {
+      const provider = await window.ide.upsertAuthProvider(providerEditor);
+      await refreshAuthState();
+      setLogs((prev) => [
+        `[auth] provider upserted ${provider.id} (${provider.protocol})`,
+        ...prev
+      ]);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "provider update failed";
+      setLogs((prev) => [`[auth] provider error: ${message}`, ...prev]);
+    }
+  };
+
+  const toggleAuthRole = (role: AuthRole) => {
+    setAuthSelectedRoles((current) => {
+      if (current.includes(role)) {
+        const next = current.filter((item) => item !== role);
+        return next.length > 0 ? next : ["viewer"];
+      }
+      return [...current, role];
+    });
+  };
+
   const createMemoryEntry = async () => {
     if (!memoryTitle.trim() || !memoryContent.trim()) {
       return;
@@ -1923,6 +2035,114 @@ export function App() {
           {panelTab === "plan" ? (
             <div className="panel-scroll">
               <h4>Plan & Approvals</h4>
+              <div className="checkpoint-card">
+                <strong>Enterprise Auth (OIDC + SAML + RBAC)</strong>
+                <div className="inline-search">
+                  <select
+                    value={authProviderId}
+                    onChange={(event) => setAuthProviderId(event.target.value)}
+                  >
+                    {authProviders.map((provider) => (
+                      <option key={provider.id} value={provider.id}>
+                        {provider.name} [{provider.protocol}]
+                      </option>
+                    ))}
+                  </select>
+                  <input
+                    value={authEmail}
+                    onChange={(event) => setAuthEmail(event.target.value)}
+                    placeholder="user email"
+                  />
+                </div>
+                <input
+                  value={authDisplayName}
+                  onChange={(event) => setAuthDisplayName(event.target.value)}
+                  placeholder="display name"
+                />
+                <div className="inline-search">
+                  {authRoles.map((role) => (
+                    <label key={`role-${role}`} style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                      <input
+                        type="checkbox"
+                        checked={authSelectedRoles.includes(role)}
+                        onChange={() => toggleAuthRole(role)}
+                      />
+                      {role}
+                    </label>
+                  ))}
+                </div>
+                <div className="inline-search">
+                  <button onClick={() => { void loginAuth(); }}>Login</button>
+                  <button onClick={() => { void logoutAuth(); }}>Logout</button>
+                  <button onClick={() => { void refreshAuthState(); }}>Refresh Auth</button>
+                </div>
+                {authSession ? (
+                  <>
+                    <code>session: {authSession.email} ({authSession.protocol})</code>
+                    <code>roles: {authSession.roles.join(", ")}</code>
+                    <code>provider: {authSession.providerId} | expires: {authSession.expiresAt}</code>
+                  </>
+                ) : (
+                  <p className="empty">No active auth session.</p>
+                )}
+                <details>
+                  <summary>Provider Upsert (Admin/Security Admin)</summary>
+                  <input
+                    value={providerEditor.id}
+                    onChange={(event) => setProviderEditor((current) => ({ ...current, id: event.target.value }))}
+                    placeholder="provider id"
+                  />
+                  <input
+                    value={providerEditor.name}
+                    onChange={(event) => setProviderEditor((current) => ({ ...current, name: event.target.value }))}
+                    placeholder="provider name"
+                  />
+                  <div className="inline-search">
+                    <select
+                      value={providerEditor.protocol}
+                      onChange={(event) =>
+                        setProviderEditor((current) => ({
+                          ...current,
+                          protocol: event.target.value as "oidc" | "saml"
+                        }))
+                      }
+                    >
+                      <option value="oidc">oidc</option>
+                      <option value="saml">saml</option>
+                    </select>
+                    <label style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                      <input
+                        type="checkbox"
+                        checked={providerEditor.enabled}
+                        onChange={(event) =>
+                          setProviderEditor((current) => ({ ...current, enabled: event.target.checked }))
+                        }
+                      />
+                      enabled
+                    </label>
+                  </div>
+                  <input
+                    value={providerEditor.issuer}
+                    onChange={(event) => setProviderEditor((current) => ({ ...current, issuer: event.target.value }))}
+                    placeholder="issuer"
+                  />
+                  <input
+                    value={providerEditor.entrypoint}
+                    onChange={(event) =>
+                      setProviderEditor((current) => ({ ...current, entrypoint: event.target.value }))
+                    }
+                    placeholder="entrypoint"
+                  />
+                  <input
+                    value={providerEditor.clientId}
+                    onChange={(event) =>
+                      setProviderEditor((current) => ({ ...current, clientId: event.target.value }))
+                    }
+                    placeholder="client id"
+                  />
+                  <button onClick={() => { void upsertProvider(); }}>Upsert Provider</button>
+                </details>
+              </div>
               {pendingApprovalCommand ? (
                 <div className="checkpoint-card">
                   <strong>Pending Command Approval</strong>

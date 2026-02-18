@@ -42,6 +42,13 @@ import {
   runMultiFileRefactor,
   type MultiFileRefactorResult
 } from "./refactor-mode.js";
+import {
+  createAuthManager,
+  type AuthSession,
+  type RbacAction,
+  type RbacRole,
+  type SsoProvider
+} from "./auth.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -2398,6 +2405,8 @@ async function createWindow(): Promise<void> {
 
 app.whenReady().then(async () => {
   await fs.mkdir(checkpointsRoot(), { recursive: true });
+  const authManager = createAuthManager(runtimeDataRoot());
+  await authManager.initialize();
 
   const runtime = new AgentRuntime({
     checkpointRoot: checkpointsRoot(),
@@ -2417,6 +2426,17 @@ app.whenReady().then(async () => {
       };
     }
   });
+
+  async function requireAuthorization(action: RbacAction): Promise<{ actor: string; session: AuthSession }> {
+    const check = await authManager.authorize(action);
+    if (!check.allowed || !check.session) {
+      throw new Error(`authorization denied (${action}): ${check.reason}`);
+    }
+    return {
+      actor: check.session.email,
+      session: check.session
+    };
+  }
 
   ipcMain.handle("workspace:open", async () => {
     const result = await dialog.showOpenDialog({
@@ -2457,8 +2477,10 @@ app.whenReady().then(async () => {
   });
 
   ipcMain.handle("file:write", async (_event, root: string, relPath: string, content: string) => {
+    const { actor } = await requireAuthorization("workspace.write");
     await safeWrite(root, relPath, content);
     await appendAuditEvent({
+      actor,
       action: "file.write",
       target: relPath,
       decision: "executed",
@@ -2482,6 +2504,10 @@ app.whenReady().then(async () => {
         allowSecrets?: boolean;
       }
     ): Promise<DiffApplyResult> => {
+      const session = await requireAuthorization("diff.apply");
+      if (payload.allowSecrets === true) {
+        await requireAuthorization("diff.allow_secrets");
+      }
       const result = await applyDiffQueue({
         root: payload.root,
         path: payload.path,
@@ -2494,6 +2520,7 @@ app.whenReady().then(async () => {
       const checkpoint =
         result.checkpointId ? await readDiffCheckpoint(result.checkpointId) : null;
       await appendAuditEvent({
+        actor: session.actor,
         action: "diff.apply_queue",
         target: payload.path,
         decision:
@@ -2523,8 +2550,10 @@ app.whenReady().then(async () => {
   });
 
   ipcMain.handle("diff:revert-checkpoint", async (_event, checkpointId: string) => {
+    const { actor } = await requireAuthorization("diff.apply");
     const result = await revertDiffCheckpoint(checkpointId);
     await appendAuditEvent({
+      actor,
       action: "diff.revert_checkpoint",
       target: checkpointId,
       decision: result.ok ? "executed" : "error",
@@ -2538,8 +2567,10 @@ app.whenReady().then(async () => {
   });
 
   ipcMain.handle("diff:verify-checkpoint-signature", async (_event, checkpointId: string) => {
+    const { actor } = await requireAuthorization("workspace.read");
     const result = await verifyPatchManifest(checkpointId);
     await appendAuditEvent({
+      actor,
       action: "diff.verify_signature",
       target: checkpointId,
       decision: result.valid ? "executed" : "error",
@@ -2549,6 +2580,7 @@ app.whenReady().then(async () => {
   });
 
   ipcMain.handle("file:create", async (_event, root: string, relPath: string, isDirectory: boolean) => {
+    const { actor } = await requireAuthorization("workspace.write");
     const absolute = resolve(root, relPath);
     if (!isWithin(root, absolute)) {
       throw new Error("path traversal denied");
@@ -2560,6 +2592,7 @@ app.whenReady().then(async () => {
       await fs.writeFile(absolute, "", "utf8");
     }
     await appendAuditEvent({
+      actor,
       action: "file.create",
       target: relPath,
       decision: "executed",
@@ -2570,6 +2603,7 @@ app.whenReady().then(async () => {
   });
 
   ipcMain.handle("file:rename", async (_event, root: string, fromPath: string, toPath: string) => {
+    const { actor } = await requireAuthorization("workspace.write");
     const fromAbs = resolve(root, fromPath);
     const toAbs = resolve(root, toPath);
     if (!isWithin(root, fromAbs) || !isWithin(root, toAbs)) {
@@ -2578,6 +2612,7 @@ app.whenReady().then(async () => {
     await fs.mkdir(resolve(toAbs, ".."), { recursive: true });
     await fs.rename(fromAbs, toAbs);
     await appendAuditEvent({
+      actor,
       action: "file.rename",
       target: `${fromPath} -> ${toPath}`,
       decision: "executed",
@@ -2588,12 +2623,14 @@ app.whenReady().then(async () => {
   });
 
   ipcMain.handle("file:delete", async (_event, root: string, relPath: string) => {
+    const { actor } = await requireAuthorization("workspace.write");
     const absolute = resolve(root, relPath);
     if (!isWithin(root, absolute)) {
       throw new Error("path traversal denied");
     }
     await fs.rm(absolute, { recursive: true, force: true });
     await appendAuditEvent({
+      actor,
       action: "file.delete",
       target: relPath,
       decision: "executed",
@@ -2864,10 +2901,12 @@ app.whenReady().then(async () => {
   });
 
   ipcMain.handle("terminal:run-approved", async (_event, root: string, command: string): Promise<TerminalResult> => {
+    const { actor } = await requireAuthorization("terminal.approved_run");
     const { highRisk } = evaluateTerminalPolicy(command);
     const policy = commandPolicy(command);
     if (policy.decision === "deny") {
       await appendAuditEvent({
+        actor,
         action: "terminal.approved_run",
         target: command,
         decision: "deny",
@@ -2901,6 +2940,7 @@ app.whenReady().then(async () => {
       }
     });
     await appendAuditEvent({
+      actor,
       action: "terminal.approved_run",
       target: command,
       decision: run.exitCode === 0 ? "executed" : "error",
@@ -3012,6 +3052,7 @@ app.whenReady().then(async () => {
         outputDir?: string;
       }
     ): Promise<ProjectBuilderResult> => {
+      const { actor } = await requireAuthorization("auto.project_builder");
       const result = await buildProjectTemplate({
         request: {
           workspaceRoot: payload.workspaceRoot,
@@ -3023,6 +3064,7 @@ app.whenReady().then(async () => {
       });
 
       await appendAuditEvent({
+        actor,
         action: "auto.project_builder",
         target: result.projectRoot,
         decision: "executed",
@@ -3053,6 +3095,10 @@ app.whenReady().then(async () => {
         maxFiles?: number;
       }
     ): Promise<MultiFileRefactorResult> => {
+      const { actor } = await requireAuthorization("auto.multi_refactor");
+      if (payload.allowSensitive === true) {
+        await requireAuthorization("auto.multi_refactor_sensitive");
+      }
       const maxFiles = Math.max(20, Math.min(5000, Number(payload.maxFiles) || 1200));
       const index = await runWorkspaceIndex(
         payload.root,
@@ -3090,6 +3136,7 @@ app.whenReady().then(async () => {
       });
 
       await appendAuditEvent({
+        actor,
         action: "auto.multi_refactor",
         target: `${payload.from} -> ${payload.to}`,
         decision:
@@ -3114,6 +3161,89 @@ app.whenReady().then(async () => {
     }
   );
 
+  ipcMain.handle("auth:providers:list", async (): Promise<SsoProvider[]> => {
+    return authManager.listProviders();
+  });
+
+  ipcMain.handle("auth:roles:list", async (): Promise<RbacRole[]> => {
+    return authManager.listRoles();
+  });
+
+  ipcMain.handle("auth:session:get", async (): Promise<AuthSession | null> => {
+    return authManager.getSession();
+  });
+
+  ipcMain.handle(
+    "auth:providers:upsert",
+    async (
+      _event,
+      payload: {
+        id: string;
+        name: string;
+        protocol: "oidc" | "saml";
+        issuer: string;
+        entrypoint: string;
+        clientId?: string;
+        enabled?: boolean;
+      }
+    ): Promise<SsoProvider> => {
+      const { actor } = await requireAuthorization("auth.manage");
+      const provider = await authManager.upsertProvider(payload);
+      await appendAuditEvent({
+        actor,
+        action: "auth.provider.upsert",
+        target: provider.id,
+        decision: "executed",
+        reason: `provider updated (${provider.protocol})`,
+        metadata: {
+          enabled: provider.enabled,
+          issuer: provider.issuer
+        }
+      });
+      return provider;
+    }
+  );
+
+  ipcMain.handle(
+    "auth:session:login",
+    async (
+      _event,
+      payload: {
+        providerId: string;
+        email: string;
+        displayName?: string;
+        roles?: RbacRole[];
+      }
+    ): Promise<AuthSession> => {
+      const session = await authManager.login(payload);
+      await appendAuditEvent({
+        actor: session.email,
+        action: "auth.session.login",
+        target: session.email,
+        decision: "executed",
+        reason: `session established (${session.protocol})`,
+        metadata: {
+          provider_id: session.providerId,
+          roles: session.roles
+        }
+      });
+      return session;
+    }
+  );
+
+  ipcMain.handle("auth:session:logout", async (): Promise<{ ok: boolean }> => {
+    const session = await authManager.getSession();
+    await authManager.logout();
+    await appendAuditEvent({
+      actor: session?.email ?? "desktop-user",
+      action: "auth.session.logout",
+      target: session?.email ?? "anonymous",
+      decision: "executed",
+      reason: "session cleared"
+    });
+    return { ok: true };
+  });
+
   ipcMain.handle("checkpoints:list", async () => {
     return listCheckpoints();
   });
@@ -3127,6 +3257,7 @@ app.whenReady().then(async () => {
   });
 
   ipcMain.handle("audit:export", async () => {
+    await requireAuthorization("audit.export");
     return exportAudit();
   });
 

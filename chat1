@@ -49,9 +49,11 @@ Project: Atlas Meridian (enterprise AI IDE)
 14. Added multi-file refactor mode with preview/apply, sensitive-path approval gate, deterministic artifacts, and grounding from rename-impact + call graph (AUTO-002).
 15. Added secret detection gate before patch apply in diff workflow with explicit block reasons and finding counts (ENT-008).
 16. Added audit log secret redaction for targets/reasons/metadata so exported events are sanitized by default (ENT-009).
+17. Added OIDC/SAML provider registry and desktop auth session flows with protocol-aware login endpoints (ENT-001, ENT-002).
+18. Added RBAC role model (`viewer`, `developer`, `admin`, `security_admin`) and enforced high-impact action authorization in runtime handlers (ENT-003).
 
 ## Current Progress Snapshot
-- Feature tracker currently records: 133/170 (78.2%).
+- Feature tracker currently records: 136/170 (80.0%).
 - In-progress areas include advanced indexing, autonomy builder extensions, enterprise SSO/RBAC/security layers, release hardening, and full benchmark KPIs.
 
 ## Continuation Rules
@@ -64,6 +66,6 @@ Project: Atlas Meridian (enterprise AI IDE)
 4. Never continue implementation before reading latest `chatN` continuity file.
 
 ## Immediate Next Tasks
-1. Continue enterprise/public release milestones: ENT-001..003, ENT-012..015, ENT-017.
+1. Continue enterprise/public release milestones: ENT-012..015, ENT-017.
 2. Continue cloud/release milestones: CLOUD-006..009 and REL-001..010.
 3. Keep extending benchmark/KPI gates and regression-blocking CI behavior.
