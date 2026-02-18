@@ -364,6 +364,47 @@ type AuthSession = {
   expiresAt: string;
 };
 
+type TelemetryConsent = "unknown" | "granted" | "denied";
+type ControlPlaneMode = "disabled" | "managed" | "self_hosted";
+
+type EnterpriseSettings = {
+  version: 1;
+  updatedAt: string;
+  telemetry: {
+    consent: TelemetryConsent;
+    enabled: boolean;
+    privacyMode: boolean;
+    consentedAt: string | null;
+    lastUpdated: string;
+  };
+  controlPlane: {
+    mode: ControlPlaneMode;
+    baseUrl: string;
+    requireTls: boolean;
+    allowInsecureLocalhost: boolean;
+    apiToken: string | null;
+    orgId: string | null;
+    workspaceId: string | null;
+    lastUpdated: string;
+  };
+};
+
+type ControlPlaneHealthResult = {
+  ok: boolean;
+  mode: ControlPlaneMode;
+  url: string | null;
+  statusCode: number | null;
+  reason: string | null;
+};
+
+type ControlPlanePushResult = {
+  sent: boolean;
+  accepted: number;
+  url: string | null;
+  statusCode: number | null;
+  reason: string | null;
+};
+
 type ProjectBuilderResult = {
   runId: string;
   template: "node_microservices_postgres";
@@ -727,6 +768,21 @@ export function App() {
     clientId: "atlas-corp",
     enabled: true
   });
+  const [enterpriseSettings, setEnterpriseSettings] = useState<EnterpriseSettings | null>(null);
+  const [enterpriseDraft, setEnterpriseDraft] = useState({
+    consent: "unknown" as TelemetryConsent,
+    telemetryEnabled: false,
+    privacyMode: false,
+    mode: "disabled" as ControlPlaneMode,
+    baseUrl: "https://control.atlasmeridian.dev",
+    requireTls: true,
+    allowInsecureLocalhost: false,
+    apiToken: "",
+    orgId: "",
+    workspaceId: ""
+  });
+  const [controlPlaneHealth, setControlPlaneHealth] = useState<ControlPlaneHealthResult | null>(null);
+  const [controlPlanePushResult, setControlPlanePushResult] = useState<ControlPlanePushResult | null>(null);
   const [autoSaveMode, setAutoSaveMode] = useState<"manual" | "afterDelay" | "onBlur">("manual");
   const dragRef = useRef<null | "left" | "right" | "bottom">(null);
 
@@ -808,6 +864,23 @@ export function App() {
     }
   };
 
+  const refreshEnterpriseSettings = async () => {
+    const settings = await window.ide.getEnterpriseSettings();
+    setEnterpriseSettings(settings);
+    setEnterpriseDraft({
+      consent: settings.telemetry.consent,
+      telemetryEnabled: settings.telemetry.enabled,
+      privacyMode: settings.telemetry.privacyMode,
+      mode: settings.controlPlane.mode,
+      baseUrl: settings.controlPlane.baseUrl,
+      requireTls: settings.controlPlane.requireTls,
+      allowInsecureLocalhost: settings.controlPlane.allowInsecureLocalhost,
+      apiToken: settings.controlPlane.apiToken ?? "",
+      orgId: settings.controlPlane.orgId ?? "",
+      workspaceId: settings.controlPlane.workspaceId ?? ""
+    });
+  };
+
   useEffect(() => {
     const keydown = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
@@ -847,6 +920,7 @@ export function App() {
     void refreshIndexDiagnostics();
     void refreshTeamData();
     void refreshAuthState();
+    void refreshEnterpriseSettings();
     void window.ide.startWatch(workspaceRoot);
     const unsubscribe = window.ide.onWorkspaceChanged(async () => {
       await refreshTree(workspaceRoot);
@@ -866,6 +940,7 @@ export function App() {
     void refreshAudit();
     void refreshTeamData();
     void refreshAuthState();
+    void refreshEnterpriseSettings();
   }, []);
 
   useEffect(() => {
@@ -1545,6 +1620,94 @@ export function App() {
     }
   };
 
+  const saveEnterpriseSettings = async () => {
+    try {
+      await window.ide.setPrivacyMode(enterpriseDraft.privacyMode);
+      await window.ide.updateTelemetrySettings({
+        consent: enterpriseDraft.consent,
+        enabled: enterpriseDraft.telemetryEnabled
+      });
+      await window.ide.updateControlPlaneSettings({
+        mode: enterpriseDraft.mode,
+        baseUrl: enterpriseDraft.baseUrl.trim(),
+        requireTls: enterpriseDraft.requireTls,
+        allowInsecureLocalhost: enterpriseDraft.allowInsecureLocalhost,
+        apiToken: enterpriseDraft.apiToken.trim() || null,
+        orgId: enterpriseDraft.orgId.trim() || null,
+        workspaceId: enterpriseDraft.workspaceId.trim() || null
+      });
+      await Promise.all([refreshEnterpriseSettings(), refreshAudit()]);
+      setLogs((prev) => [
+        `[enterprise] settings saved mode=${enterpriseDraft.mode} consent=${enterpriseDraft.consent} privacy=${enterpriseDraft.privacyMode}`,
+        ...prev
+      ]);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "failed to save enterprise settings";
+      setLogs((prev) => [`[enterprise] settings error: ${message}`, ...prev]);
+    }
+  };
+
+  const runControlPlaneHealthCheck = async () => {
+    try {
+      const result = await window.ide.controlPlaneHealthCheck();
+      setControlPlaneHealth(result);
+      await refreshAudit();
+      setLogs((prev) => [
+        `[control-plane] health ok=${result.ok} mode=${result.mode} status=${result.statusCode ?? "none"}${result.reason ? ` reason=${result.reason}` : ""}`,
+        ...prev
+      ]);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "control-plane health check failed";
+      setLogs((prev) => [`[control-plane] health error: ${message}`, ...prev]);
+    }
+  };
+
+  const pushControlPlaneMetric = async () => {
+    const repoName = workspaceRoot
+      ? workspaceRoot.split(/[\\/]/).filter(Boolean).slice(-1)[0] ?? "workspace"
+      : "workspace";
+    const payload = [
+      {
+        metric_name: "manual_control_plane_ping",
+        ts: new Date().toISOString(),
+        value: 1,
+        tags: {
+          org: enterpriseDraft.orgId.trim() || "local-org",
+          repo: repoName,
+          branch: "main",
+          run_id: `manual-${Date.now()}`
+        }
+      }
+    ];
+    try {
+      const result = await window.ide.pushControlPlaneMetrics(payload);
+      setControlPlanePushResult(result);
+      await refreshAudit();
+      setLogs((prev) => [
+        `[control-plane] metric push sent=${result.sent} accepted=${result.accepted}${result.reason ? ` reason=${result.reason}` : ""}`,
+        ...prev
+      ]);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "metric push failed";
+      setLogs((prev) => [`[control-plane] metric push error: ${message}`, ...prev]);
+    }
+  };
+
+  const pushControlPlaneAudit = async () => {
+    try {
+      const result = await window.ide.pushControlPlaneAudit(20);
+      setControlPlanePushResult(result);
+      await refreshAudit();
+      setLogs((prev) => [
+        `[control-plane] audit push sent=${result.sent} accepted=${result.accepted}${result.reason ? ` reason=${result.reason}` : ""}`,
+        ...prev
+      ]);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "audit push failed";
+      setLogs((prev) => [`[control-plane] audit push error: ${message}`, ...prev]);
+    }
+  };
+
   const toggleAuthRole = (role: AuthRole) => {
     setAuthSelectedRoles((current) => {
       if (current.includes(role)) {
@@ -2142,6 +2305,159 @@ export function App() {
                   />
                   <button onClick={() => { void upsertProvider(); }}>Upsert Provider</button>
                 </details>
+              </div>
+              <div className="checkpoint-card">
+                <strong>Enterprise Telemetry, Privacy, and Gateway</strong>
+                <div className="inline-search">
+                  <label style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                    Consent
+                    <select
+                      value={enterpriseDraft.consent}
+                      onChange={(event) =>
+                        setEnterpriseDraft((current) => ({
+                          ...current,
+                          consent: event.target.value as TelemetryConsent
+                        }))
+                      }
+                    >
+                      <option value="unknown">unknown</option>
+                      <option value="granted">granted</option>
+                      <option value="denied">denied</option>
+                    </select>
+                  </label>
+                  <label style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                    <input
+                      type="checkbox"
+                      checked={enterpriseDraft.telemetryEnabled}
+                      onChange={(event) =>
+                        setEnterpriseDraft((current) => ({
+                          ...current,
+                          telemetryEnabled: event.target.checked
+                        }))
+                      }
+                    />
+                    Telemetry enabled
+                  </label>
+                  <label style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                    <input
+                      type="checkbox"
+                      checked={enterpriseDraft.privacyMode}
+                      onChange={(event) =>
+                        setEnterpriseDraft((current) => ({
+                          ...current,
+                          privacyMode: event.target.checked
+                        }))
+                      }
+                    />
+                    Privacy mode
+                  </label>
+                </div>
+                <div className="inline-search">
+                  <label style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                    Gateway mode
+                    <select
+                      value={enterpriseDraft.mode}
+                      onChange={(event) =>
+                        setEnterpriseDraft((current) => ({
+                          ...current,
+                          mode: event.target.value as ControlPlaneMode
+                        }))
+                      }
+                    >
+                      <option value="disabled">disabled</option>
+                      <option value="managed">managed</option>
+                      <option value="self_hosted">self_hosted</option>
+                    </select>
+                  </label>
+                  <label style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                    <input
+                      type="checkbox"
+                      checked={enterpriseDraft.requireTls}
+                      onChange={(event) =>
+                        setEnterpriseDraft((current) => ({
+                          ...current,
+                          requireTls: event.target.checked
+                        }))
+                      }
+                    />
+                    Require TLS
+                  </label>
+                  <label style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                    <input
+                      type="checkbox"
+                      checked={enterpriseDraft.allowInsecureLocalhost}
+                      onChange={(event) =>
+                        setEnterpriseDraft((current) => ({
+                          ...current,
+                          allowInsecureLocalhost: event.target.checked
+                        }))
+                      }
+                    />
+                    Allow localhost http
+                  </label>
+                </div>
+                <input
+                  value={enterpriseDraft.baseUrl}
+                  onChange={(event) =>
+                    setEnterpriseDraft((current) => ({ ...current, baseUrl: event.target.value }))
+                  }
+                  placeholder="control plane base URL"
+                />
+                <div className="inline-search">
+                  <input
+                    value={enterpriseDraft.orgId}
+                    onChange={(event) =>
+                      setEnterpriseDraft((current) => ({ ...current, orgId: event.target.value }))
+                    }
+                    placeholder="org id (optional)"
+                  />
+                  <input
+                    value={enterpriseDraft.workspaceId}
+                    onChange={(event) =>
+                      setEnterpriseDraft((current) => ({ ...current, workspaceId: event.target.value }))
+                    }
+                    placeholder="workspace id (optional)"
+                  />
+                </div>
+                <input
+                  value={enterpriseDraft.apiToken}
+                  onChange={(event) =>
+                    setEnterpriseDraft((current) => ({ ...current, apiToken: event.target.value }))
+                  }
+                  placeholder="gateway api token (optional)"
+                />
+                <div className="inline-search">
+                  <button onClick={() => { void saveEnterpriseSettings(); }}>Save Enterprise Settings</button>
+                  <button onClick={() => { void refreshEnterpriseSettings(); }}>Refresh Settings</button>
+                  <button onClick={() => { void runControlPlaneHealthCheck(); }}>Gateway Health</button>
+                  <button onClick={() => { void pushControlPlaneMetric(); }}>Push Sample Metric</button>
+                  <button onClick={() => { void pushControlPlaneAudit(); }}>Push Recent Audit</button>
+                </div>
+                {enterpriseSettings ? (
+                  <>
+                    <code>
+                      consent: {enterpriseSettings.telemetry.consent} | enabled: {String(enterpriseSettings.telemetry.enabled)} | privacy: {String(enterpriseSettings.telemetry.privacyMode)}
+                    </code>
+                    <code>
+                      gateway: {enterpriseSettings.controlPlane.mode} {enterpriseSettings.controlPlane.baseUrl}
+                    </code>
+                    <code>
+                      tls: {String(enterpriseSettings.controlPlane.requireTls)} | localhost-http: {String(enterpriseSettings.controlPlane.allowInsecureLocalhost)}
+                    </code>
+                  </>
+                ) : (
+                  <p className="empty">No enterprise settings loaded yet.</p>
+                )}
+                {controlPlaneHealth ? (
+                  <code>
+                    health: ok={String(controlPlaneHealth.ok)} mode={controlPlaneHealth.mode} status={controlPlaneHealth.statusCode ?? "none"} reason={controlPlaneHealth.reason ?? "none"}
+                  </code>
+                ) : null}
+                {controlPlanePushResult ? (
+                  <code>
+                    push: sent={String(controlPlanePushResult.sent)} accepted={controlPlanePushResult.accepted} status={controlPlanePushResult.statusCode ?? "none"} reason={controlPlanePushResult.reason ?? "none"}
+                  </code>
+                ) : null}
               </div>
               {pendingApprovalCommand ? (
                 <div className="checkpoint-card">

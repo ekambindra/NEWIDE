@@ -2,8 +2,8 @@
 
 ## Current Completion
 
-- Completed features: 136/170
-- Completion percentage: 80.0%
+- Completed features: 140/170
+- Completion percentage: 82.4%
 
 ## Latest Implemented Increments
 
@@ -61,6 +61,10 @@
 52. OIDC SSO provider support with persistent provider registry and interactive login flow in desktop UI (ENT-001).
 53. SAML SSO provider support with configurable provider entries and protocol-aware session establishment (ENT-002).
 54. RBAC baseline with `viewer/developer/admin/security_admin` roles and runtime enforcement on high-impact actions (file writes, diff apply, approved terminal runs, project builder, multi-refactor, audit export, provider management) (ENT-003).
+55. Telemetry consent manager with persistent opt-in state, explicit `unknown/granted/denied` consent handling, and runtime gating APIs (ENT-012).
+56. Privacy mode control that force-disables telemetry and blocks metric ingestion until privacy mode is turned off (ENT-013).
+57. TLS-enforced control-plane connectivity policy with strict URL validation and localhost-only insecure override for development (ENT-015).
+58. Self-hosted gateway mode support with configurable endpoint, token/org/workspace metadata, signed request headers, health checks, and desktop management UI (ENT-017).
 
 ## Verification Commands
 

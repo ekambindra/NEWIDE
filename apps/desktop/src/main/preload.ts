@@ -258,6 +258,59 @@ type AuthSession = {
   expiresAt: string;
 };
 
+type TelemetryConsent = "unknown" | "granted" | "denied";
+type ControlPlaneMode = "disabled" | "managed" | "self_hosted";
+
+type EnterpriseSettings = {
+  version: 1;
+  updatedAt: string;
+  telemetry: {
+    consent: TelemetryConsent;
+    enabled: boolean;
+    privacyMode: boolean;
+    consentedAt: string | null;
+    lastUpdated: string;
+  };
+  controlPlane: {
+    mode: ControlPlaneMode;
+    baseUrl: string;
+    requireTls: boolean;
+    allowInsecureLocalhost: boolean;
+    apiToken: string | null;
+    orgId: string | null;
+    workspaceId: string | null;
+    lastUpdated: string;
+  };
+};
+
+type ControlPlaneHealthResult = {
+  ok: boolean;
+  mode: ControlPlaneMode;
+  url: string | null;
+  statusCode: number | null;
+  reason: string | null;
+};
+
+type ControlPlanePushResult = {
+  sent: boolean;
+  accepted: number;
+  url: string | null;
+  statusCode: number | null;
+  reason: string | null;
+};
+
+type ControlPlaneMetricRecord = {
+  metric_name: string;
+  ts: string;
+  value: number;
+  tags: {
+    org: string;
+    repo: string;
+    branch: string;
+    run_id: string;
+  };
+};
+
 type ProjectBuilderResult = {
   runId: string;
   template: "node_microservices_postgres";
@@ -518,6 +571,31 @@ const api = {
     clientId?: string;
     enabled?: boolean;
   }): Promise<SsoProvider> => ipcRenderer.invoke("auth:providers:upsert", payload),
+  getEnterpriseSettings: (): Promise<EnterpriseSettings> => ipcRenderer.invoke("enterprise:settings:get"),
+  updateTelemetrySettings: (payload: {
+    consent?: TelemetryConsent;
+    enabled?: boolean;
+  }): Promise<EnterpriseSettings> => ipcRenderer.invoke("enterprise:telemetry:update", payload),
+  setPrivacyMode: (enabled: boolean): Promise<EnterpriseSettings> =>
+    ipcRenderer.invoke("enterprise:privacy:set", { enabled }),
+  updateControlPlaneSettings: (payload: {
+    mode?: ControlPlaneMode;
+    baseUrl?: string;
+    requireTls?: boolean;
+    allowInsecureLocalhost?: boolean;
+    apiToken?: string | null;
+    orgId?: string | null;
+    workspaceId?: string | null;
+  }): Promise<EnterpriseSettings> =>
+    ipcRenderer.invoke("enterprise:control-plane:update", payload),
+  controlPlaneHealthCheck: (): Promise<ControlPlaneHealthResult> =>
+    ipcRenderer.invoke("enterprise:control-plane:health"),
+  pushControlPlaneMetrics: (
+    records: ControlPlaneMetricRecord[]
+  ): Promise<ControlPlanePushResult> =>
+    ipcRenderer.invoke("enterprise:control-plane:push-metrics", { records }),
+  pushControlPlaneAudit: (limit = 20): Promise<ControlPlanePushResult> =>
+    ipcRenderer.invoke("enterprise:control-plane:push-audit", { limit }),
   runMultiAgentTask: (
     payload: { goal: string; acceptanceCriteria: string[]; agentCount: number }
   ): Promise<MultiAgentSummary> => ipcRenderer.invoke("agent:run-multi", payload),

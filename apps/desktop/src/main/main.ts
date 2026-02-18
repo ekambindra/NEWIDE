@@ -49,6 +49,16 @@ import {
   type RbacRole,
   type SsoProvider
 } from "./auth.js";
+import {
+  createEnterpriseSettingsManager,
+  type EnterpriseSettings,
+  type TelemetryConsent,
+  type UpdateControlPlaneInput
+} from "./enterprise-settings.js";
+import {
+  createControlPlaneClient,
+  type ControlPlaneMetricRecord
+} from "./control-plane-client.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -305,6 +315,22 @@ type GreenPipelineReport = {
   passRatePercent: number;
   targetPercent: number;
   meetsTarget: boolean;
+};
+
+type ControlPlaneHealthResult = {
+  ok: boolean;
+  mode: "disabled" | "managed" | "self_hosted";
+  url: string | null;
+  statusCode: number | null;
+  reason: string | null;
+};
+
+type ControlPlanePushResult = {
+  sent: boolean;
+  accepted: number;
+  url: string | null;
+  statusCode: number | null;
+  reason: string | null;
 };
 
 const watchers = new Map<string, { watcher: FSWatcher; timer: NodeJS.Timeout | null }>();
@@ -2407,6 +2433,12 @@ app.whenReady().then(async () => {
   await fs.mkdir(checkpointsRoot(), { recursive: true });
   const authManager = createAuthManager(runtimeDataRoot());
   await authManager.initialize();
+  const enterpriseSettingsManager = createEnterpriseSettingsManager(runtimeDataRoot());
+  await enterpriseSettingsManager.initialize();
+  const controlPlaneClient = createControlPlaneClient(
+    runtimeDataRoot(),
+    enterpriseSettingsManager
+  );
 
   const runtime = new AgentRuntime({
     checkpointRoot: checkpointsRoot(),
@@ -3243,6 +3275,179 @@ app.whenReady().then(async () => {
     });
     return { ok: true };
   });
+
+  ipcMain.handle("enterprise:settings:get", async (): Promise<EnterpriseSettings> => {
+    return enterpriseSettingsManager.getSettings();
+  });
+
+  ipcMain.handle(
+    "enterprise:telemetry:update",
+    async (
+      _event,
+      payload: {
+        consent?: TelemetryConsent;
+        enabled?: boolean;
+      }
+    ): Promise<EnterpriseSettings> => {
+      const { actor } = await requireAuthorization("auth.manage");
+      if (
+        payload.consent &&
+        payload.consent !== "unknown" &&
+        payload.consent !== "granted" &&
+        payload.consent !== "denied"
+      ) {
+        throw new Error("invalid telemetry consent value");
+      }
+      const settings = await enterpriseSettingsManager.updateTelemetry({
+        consent: payload.consent,
+        enabled: payload.enabled
+      });
+      await appendAuditEvent({
+        actor,
+        action: "enterprise.telemetry.update",
+        target: settings.telemetry.consent,
+        decision: "executed",
+        reason: "telemetry consent/settings updated",
+        metadata: {
+          consent: settings.telemetry.consent,
+          enabled: settings.telemetry.enabled,
+          privacy_mode: settings.telemetry.privacyMode
+        }
+      });
+      return settings;
+    }
+  );
+
+  ipcMain.handle(
+    "enterprise:privacy:set",
+    async (
+      _event,
+      payload: {
+        enabled: boolean;
+      }
+    ): Promise<EnterpriseSettings> => {
+      const { actor } = await requireAuthorization("auth.manage");
+      const settings = await enterpriseSettingsManager.setPrivacyMode(payload.enabled === true);
+      await appendAuditEvent({
+        actor,
+        action: "enterprise.privacy_mode.set",
+        target: String(settings.telemetry.privacyMode),
+        decision: "executed",
+        reason: "privacy mode updated",
+        metadata: {
+          privacy_mode: settings.telemetry.privacyMode,
+          telemetry_enabled: settings.telemetry.enabled
+        }
+      });
+      return settings;
+    }
+  );
+
+  ipcMain.handle(
+    "enterprise:control-plane:update",
+    async (
+      _event,
+      payload: UpdateControlPlaneInput
+    ): Promise<EnterpriseSettings> => {
+      const { actor } = await requireAuthorization("auth.manage");
+      if (
+        payload.mode &&
+        payload.mode !== "disabled" &&
+        payload.mode !== "managed" &&
+        payload.mode !== "self_hosted"
+      ) {
+        throw new Error("invalid control-plane mode");
+      }
+      const settings = await enterpriseSettingsManager.updateControlPlane(payload);
+      await appendAuditEvent({
+        actor,
+        action: "enterprise.control_plane.update",
+        target: settings.controlPlane.mode,
+        decision: "executed",
+        reason: "control plane settings updated",
+        metadata: {
+          mode: settings.controlPlane.mode,
+          base_url: settings.controlPlane.baseUrl,
+          require_tls: settings.controlPlane.requireTls,
+          allow_insecure_localhost: settings.controlPlane.allowInsecureLocalhost
+        }
+      });
+      return settings;
+    }
+  );
+
+  ipcMain.handle(
+    "enterprise:control-plane:health",
+    async (): Promise<ControlPlaneHealthResult> => {
+      const { actor } = await requireAuthorization("workspace.read");
+      const result = await controlPlaneClient.healthCheck();
+      await appendAuditEvent({
+        actor,
+        action: "enterprise.control_plane.health",
+        target: result.url ?? result.mode,
+        decision: result.ok ? "executed" : "error",
+        reason: result.reason ?? "health check succeeded",
+        metadata: {
+          mode: result.mode,
+          status_code: result.statusCode
+        }
+      });
+      return result;
+    }
+  );
+
+  ipcMain.handle(
+    "enterprise:control-plane:push-metrics",
+    async (
+      _event,
+      payload: { records: ControlPlaneMetricRecord[] }
+    ): Promise<ControlPlanePushResult> => {
+      const { actor } = await requireAuthorization("auth.manage");
+      const records = Array.isArray(payload.records) ? payload.records : [];
+      const result = await controlPlaneClient.pushMetrics(records);
+      await appendAuditEvent({
+        actor,
+        action: "enterprise.control_plane.metrics.push",
+        target: result.url ?? "disabled",
+        decision: result.sent ? "executed" : "error",
+        reason: result.reason ?? "metrics push completed",
+        metadata: {
+          requested: records.length,
+          accepted: result.accepted,
+          status_code: result.statusCode
+        }
+      });
+      return result;
+    }
+  );
+
+  ipcMain.handle(
+    "enterprise:control-plane:push-audit",
+    async (
+      _event,
+      payload?: { limit?: number }
+    ): Promise<ControlPlanePushResult> => {
+      const { actor } = await requireAuthorization("audit.export");
+      const limit = Math.max(1, Math.min(200, Number(payload?.limit) || 20));
+      const events = await readRecentAudit(limit);
+      const result = await controlPlaneClient.pushAuditEvents(
+        events as unknown as Array<Record<string, unknown>>
+      );
+      await appendAuditEvent({
+        actor,
+        action: "enterprise.control_plane.audit.push",
+        target: result.url ?? "disabled",
+        decision: result.sent ? "executed" : "error",
+        reason: result.reason ?? "audit push completed",
+        metadata: {
+          requested: events.length,
+          accepted: result.accepted,
+          status_code: result.statusCode
+        }
+      });
+      return result;
+    }
+  );
 
   ipcMain.handle("checkpoints:list", async () => {
     return listCheckpoints();

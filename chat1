@@ -51,10 +51,14 @@ Project: Atlas Meridian (enterprise AI IDE)
 16. Added audit log secret redaction for targets/reasons/metadata so exported events are sanitized by default (ENT-009).
 17. Added OIDC/SAML provider registry and desktop auth session flows with protocol-aware login endpoints (ENT-001, ENT-002).
 18. Added RBAC role model (`viewer`, `developer`, `admin`, `security_admin`) and enforced high-impact action authorization in runtime handlers (ENT-003).
+19. Added enterprise settings manager with persisted telemetry consent state (`unknown/granted/denied`) and explicit runtime gating checks (ENT-012).
+20. Added privacy mode runtime controls that force telemetry off and block metric ingestion while enabled (ENT-013).
+21. Added control-plane TLS policy validation in desktop runtime with strict HTTPS enforcement and localhost-only insecure override for local dev (ENT-015).
+22. Added self-hosted gateway mode with configurable endpoint/token/org/workspace settings, signed request headers, health checks, metric/audit push actions, and desktop settings UI controls (ENT-017).
 
 ## Current Progress Snapshot
-- Feature tracker currently records: 136/170 (80.0%).
-- In-progress areas include advanced indexing, autonomy builder extensions, enterprise SSO/RBAC/security layers, release hardening, and full benchmark KPIs.
+- Feature tracker currently records: 140/170 (82.4%).
+- In-progress areas include cloud deployment hardening, public release/signing/update channels, encryption-at-rest for cloud metadata, and full benchmark KPI regression gates.
 
 ## Continuation Rules
 1. Any new chat session must read this file first.
@@ -66,6 +70,7 @@ Project: Atlas Meridian (enterprise AI IDE)
 4. Never continue implementation before reading latest `chatN` continuity file.
 
 ## Immediate Next Tasks
-1. Continue enterprise/public release milestones: ENT-012..015, ENT-017.
-2. Continue cloud/release milestones: CLOUD-006..009 and REL-001..010.
-3. Keep extending benchmark/KPI gates and regression-blocking CI behavior.
+1. Complete `ENT-014` (encryption at rest for cloud metadata and artifact persistence in managed paths).
+2. Continue cloud milestones: `CLOUD-006..CLOUD-009`.
+3. Continue release hardening: `REL-001..REL-010`.
+4. Continue evaluation expansion: `EVAL-002..EVAL-008`, `EVAL-010..EVAL-014`.
