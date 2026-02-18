@@ -52,20 +52,18 @@ Each step writes:
 
 Implemented now:
 
-1. Monorepo architecture and CI.
-2. Electron shell + pane layout + persistent layout sizing.
-3. Workspace tree/search/editor/split + terminal/tests/logs.
-4. Diff chunk queue with accept/reject decisions.
-5. Checkpoint timeline + detail inspector + terminal replay.
-6. Immutable audit JSONL chain with export.
-7. Policy-gated command execution + approval path.
-8. Deterministic runtime with replay comparison.
-9. Multi-agent concurrent orchestration in runtime + UI trigger.
-10. Control-plane endpoint skeleton for required domains.
+1. Full monorepo architecture and CI pipelines across desktop, runtime, benchmark, and cloud services.
+2. Electron shell with Kiro-like panes, persisted layout, session restore, crash-safe boundary, and accessibility baseline.
+3. Workspace tree/search/editor/split + terminal/tests/logs with policy-aware command execution.
+4. Diff chunk approval queue, signed patch manifests, checkpoint restore, and grounding evidence links.
+5. Deterministic runtime artifacts, replay comparison, bounded repair loop, and multi-agent orchestration.
+6. Team layer: memory KB, ADR logs, reviewer mode, ownership mapping/conflict detection.
+7. Enterprise controls: OIDC/SAML provider support, RBAC role enforcement, policy gates, secret redaction.
+8. Managed/self-hosted control-plane integration with encrypted metadata and backup/restore paths.
+9. Release/distribution stack: macOS/Windows build/release workflows, signing paths, updater channels, provenance attestations.
+10. Benchmark harness with >=30-task corpus, KPI scoring, trend alerts, dashboard, and CI regression gates.
 
-Pending:
+Operational notes:
 
-- Full OIDC/SAML production integration.
-- Full RBAC admin UX.
-- Complete packaging/signing/update channels.
-- Full benchmark corpus and dashboard visuals.
+- Desktop release signing/notarization still requires repository secrets to be configured in GitHub Actions.
+- GitHub Pages deployment requires Pages to be enabled; the workflow now auto-enables via `actions/configure-pages`.

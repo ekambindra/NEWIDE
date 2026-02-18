@@ -25,6 +25,8 @@ This repository stores the full implementation plan, prompts, contracts, milesto
 - [Public Launch + Deployment](./governance/PUBLIC_DEPLOYMENT_AND_RELEASE.md)
 - [Open-Core + Enterprise Distribution](./governance/OPEN_CORE_DISTRIBUTION.md)
 - [Desktop Release Pipeline](./governance/RELEASE_PIPELINE.md)
+- [Beta Program and Acceptance](./governance/BETA_PROGRAM_AND_ACCEPTANCE.md)
+- [GA Signoff Checklist](./governance/GA_SIGNOFF_CHECKLIST.md)
 - [Runbook](../RUNBOOK.md)
 - [Roadmap](./ROADMAP.md)
 

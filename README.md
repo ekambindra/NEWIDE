@@ -38,4 +38,4 @@ npm run dev:desktop
 ## Milestone Status
 
 - M0-M9: Implemented (core desktop, enterprise controls, cloud baseline, release pipelines, benchmark harness)
-- M10-M11: In progress (beta/GA hardening)
+- M10-M11: Implemented as operational runbooks/checklists for beta and GA execution

@@ -94,3 +94,20 @@ Project: Atlas Meridian (enterprise AI IDE)
 1. Run signed desktop release dry-runs for macOS/Windows in CI with secrets configured (`desktop-release.yml`).
 2. Execute benchmark publishing flow and attach fresh reproducible replay artifacts to the public docs benchmark page.
 3. Start beta cohort rollout checklist and collect first-wave telemetry consent and determinism metrics.
+
+## Additional Update In This Session
+1. Diagnosed failing `docs-site` GitHub Action using `gh run view` logs.
+2. Fixed root cause in `.github/workflows/docs-site.yml` by enabling auto-provisioning:
+   - `actions/configure-pages@v5` now uses `enablement: true`.
+3. Audited documentation consistency and updated stale status docs:
+   - `README.md`
+   - `docs/plan/MILESTONE_MAP.md`
+   - `docs/plan/DECISION_COMPLETE_PLAN.md`
+   - `docs/ROADMAP.md`
+   - `docs/INDEX.md`
+   - `docs/governance/PUBLIC_DEPLOYMENT_AND_RELEASE.md`
+4. Added launch-completion governance docs:
+   - `docs/governance/BETA_PROGRAM_AND_ACCEPTANCE.md`
+   - `docs/governance/GA_SIGNOFF_CHECKLIST.md`
+5. Ran markdown internal-link audit across all `.md` files:
+   - result: `BROKEN_LINKS=0`.

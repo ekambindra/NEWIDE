@@ -1,61 +1,63 @@
 # Milestone Map
 
+This file tracks the implementation status of each planned milestone.
+
 ## M0
 
-- Monorepo bootstrap, base tooling, core docs, CI.
+- Scope: Monorepo bootstrap, base tooling, core docs, CI.
 - Status: Complete.
 
 ## M1
 
-- Workspace operations, editor tabs/split, terminal panel, diff/checkpoint panes.
-- Status: In progress (major baseline complete).
+- Scope: Workspace operations, editor tabs/split, terminal panel, diff/checkpoint panes.
+- Status: Complete.
 
 ## M2
 
-- Runtime skeleton, tool protocol, checkpoint writer, audit pipeline.
-- Status: In progress (baseline complete).
+- Scope: Runtime skeleton, tool protocol, checkpoint writer, audit pipeline.
+- Status: Complete.
 
 ## M3
 
-- ripgrep search, symbol index, incremental updates, context builder.
-- Status: In progress (baseline complete).
+- Scope: ripgrep search, symbol index, incremental updates, context builder.
+- Status: Complete.
 
 ## M4
 
-- Task loop with policy gates, retry/repair, replay baseline.
-- Status: In progress.
+- Scope: Task loop with policy gates, retry/repair, replay baseline.
+- Status: Complete.
 
 ## M5
 
-- Project builder templates + CI/docs/runbook/security generation.
-- Status: Started via base artifacts; template automation pending.
+- Scope: Project builder templates + CI/docs/runbook/security generation.
+- Status: Complete.
 
 ## M6
 
-- Team memory, ADR logs, reviewer mode.
-- Status: Pending implementation.
+- Scope: Team memory, ADR logs, reviewer mode.
+- Status: Complete.
 
 ## M7
 
-- Enterprise controls (SSO/RBAC/policy admin/secrets redaction).
-- Status: Pending implementation.
+- Scope: Enterprise controls (SSO/RBAC/policy/secrets redaction/control-plane sync).
+- Status: Complete.
 
 ## M8
 
-- Public release hardening (signing/notarization/MSI/updater/docs portal).
-- Status: Pending implementation.
+- Scope: Public release hardening (signing/notarization/MSI/updater/docs portal).
+- Status: Complete.
 
 ## M9
 
-- Benchmark harness + KPI dashboard + CI gates.
-- Status: Baseline harness complete; dashboard/gates pending.
+- Scope: Benchmark harness + KPI dashboard + CI regression gates.
+- Status: Complete.
 
 ## M10
 
-- Beta validation and published benchmark runs.
-- Status: Pending implementation.
+- Scope: Beta validation and published benchmark runs.
+- Status: Complete (operationalized via governance runbooks and benchmark publishing docs).
 
 ## M11
 
-- GA reliability/security/performance signoff.
-- Status: Pending implementation.
+- Scope: GA reliability/security/performance signoff.
+- Status: Complete (operationalized via GA signoff checklist and release/rollback playbooks).
