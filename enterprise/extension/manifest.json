@@ -1,0 +1,14 @@
+{
+  "name": "atlas-meridian-enterprise-extension",
+  "description": "Private enterprise capabilities for Atlas Meridian deployments.",
+  "features": [
+    "sso_oidc",
+    "sso_saml",
+    "rbac",
+    "advanced_policy_profiles",
+    "managed_control_plane"
+  ],
+  "compatibility": {
+    "desktop": ">=0.1.0"
+  }
+}

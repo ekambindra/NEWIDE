@@ -1,0 +1,16 @@
+{
+  "name": "@atlas-meridian/enterprise-extension",
+  "version": "0.1.0",
+  "description": "Enterprise extension bundle for Atlas Meridian",
+  "license": "UNLICENSED",
+  "private": false,
+  "type": "module",
+  "files": [
+    "README.md",
+    "manifest.json"
+  ],
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com",
+    "access": "restricted"
+  }
+}

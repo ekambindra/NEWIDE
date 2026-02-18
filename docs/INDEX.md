@@ -23,6 +23,8 @@ This repository stores the full implementation plan, prompts, contracts, milesto
 ## Governance and Deployment
 
 - [Public Launch + Deployment](./governance/PUBLIC_DEPLOYMENT_AND_RELEASE.md)
+- [Open-Core + Enterprise Distribution](./governance/OPEN_CORE_DISTRIBUTION.md)
+- [Desktop Release Pipeline](./governance/RELEASE_PIPELINE.md)
 - [Runbook](../RUNBOOK.md)
 - [Roadmap](./ROADMAP.md)
 

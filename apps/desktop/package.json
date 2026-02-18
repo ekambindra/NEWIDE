@@ -24,6 +24,7 @@
   },
   "dependencies": {
     "@ide/agent-runtime": "0.1.0",
+    "@ide/benchmark": "0.1.0",
     "@ide/indexer": "0.1.0",
     "electron": "^35.0.3",
     "electron-updater": "^6.3.9",

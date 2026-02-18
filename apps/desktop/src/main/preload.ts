@@ -324,6 +324,84 @@ type UpdateCheckResult = {
   } | null;
 };
 
+type BenchmarkResult = {
+  task: {
+    task_id: string;
+    category: string;
+    input: string;
+    expected_outcome: string;
+    timeout_sec: number;
+    scorer: string;
+  };
+  passed: boolean;
+  durationSec: number;
+  retries: number;
+  toolCalls: number;
+  diffChurn: number;
+  timeToGreenSec?: number;
+  determinismScore?: number;
+  replayMatched?: boolean;
+  filesTouched?: number;
+  groundedEditRatio?: number;
+  artifactCompleteness?: number;
+  fixLoopSucceeded?: boolean;
+  humanIntervention?: boolean;
+  failingTestsStart?: number;
+  failingTestsEnd?: number;
+  maxIntermediateFailingTests?: number;
+  indexFreshnessSmallMs?: number;
+  indexFreshnessBatchMs?: number;
+  checkpointIntegrity?: boolean;
+  nonDestructive?: boolean;
+  prReadinessScore?: number;
+  reviewerPrecision?: number;
+  decisionLogCoverage?: number;
+  inlineSuggestionLatencyMs?: number;
+};
+
+type BenchmarkDashboardReport = {
+  generatedAt: string;
+  corpusSize: number;
+  scoreCard: {
+    total: number;
+    passRate: number;
+    avgDuration: number;
+    avgRetries: number;
+    avgToolCalls: number;
+    avgDiffChurn: number;
+    avgTimeToGreen: number;
+    determinismRate: number;
+    groundedEditRatio: number;
+    fixLoopSuccessRate: number;
+    artifactCompleteness: number;
+    humanInterventionRate: number;
+    crossFileRefactorSuccess30: number;
+    crossFileRefactorSuccess100: number;
+    kpis: Array<{
+      name: string;
+      value: number;
+      target: number;
+      comparator: "gte" | "lte";
+      meetsTarget: boolean;
+      unit: string;
+    }>;
+  };
+  gate: {
+    pass: boolean;
+    failing: string[];
+  };
+  alerts: Array<{
+    metricName: string;
+    severity: "warning" | "critical";
+    direction: "increase" | "decrease";
+    deltaPercent: number;
+    baseline: number;
+    current: number;
+    message: string;
+  }>;
+  metricsHistoryCount: number;
+};
+
 type ProjectBuilderResult = {
   runId: string;
   template: "node_microservices_postgres";
@@ -614,6 +692,25 @@ const api = {
   setReleaseChannel: (channel: ReleaseChannel): Promise<{ channel: ReleaseChannel }> =>
     ipcRenderer.invoke("updates:channel:set", { channel }),
   checkForUpdates: (): Promise<UpdateCheckResult> => ipcRenderer.invoke("updates:check"),
+  getBenchmarkCorpus: (): Promise<Array<{
+    task_id: string;
+    category: string;
+    input: string;
+    expected_outcome: string;
+    timeout_sec: number;
+    scorer: string;
+  }>> => ipcRenderer.invoke("benchmark:corpus"),
+  runSimulatedBenchmark: (payload?: { seed?: number; runId?: string }): Promise<BenchmarkDashboardReport> =>
+    ipcRenderer.invoke("benchmark:run-simulated", payload),
+  scoreBenchmarkResults: (payload: {
+    results: BenchmarkResult[];
+    runId?: string;
+  }): Promise<BenchmarkDashboardReport> =>
+    ipcRenderer.invoke("benchmark:score-results", payload),
+  getBenchmarkDashboard: (): Promise<BenchmarkDashboardReport> =>
+    ipcRenderer.invoke("benchmark:dashboard"),
+  getBenchmarkGate: (): Promise<{ pass: boolean; failing: string[] }> =>
+    ipcRenderer.invoke("benchmark:gate"),
   runMultiAgentTask: (
     payload: { goal: string; acceptanceCriteria: string[]; agentCount: number }
   ): Promise<MultiAgentSummary> => ipcRenderer.invoke("agent:run-multi", payload),

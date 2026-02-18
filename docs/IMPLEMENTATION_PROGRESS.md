@@ -2,8 +2,8 @@
 
 ## Current Completion
 
-- Completed features: 152/170
-- Completion percentage: 89.4%
+- Completed features: 167/170
+- Completion percentage: 98.2%
 
 ## Latest Implemented Increments
 
@@ -77,6 +77,20 @@
 68. Added `electron-builder` packaging configuration for DMG (macOS) and MSI (Windows) artifacts with release scripts (REL-005).
 69. Added stable/beta release channel controls across release scripts, runtime updater channel configuration, and desktop UI channel management/check actions (REL-006).
 70. Added build provenance attestation steps in release workflow via `actions/attest-build-provenance` for desktop artifacts (REL-007).
+71. Added open-core publishing workflow with source archive packaging, validation gates, dry-run package previews, and npm publish path for core public packages (REL-008).
+72. Added enterprise extension private distribution package and GitHub Packages workflow with versioned dry-run/publish support (REL-009).
+73. Added public docs site scaffold (`public-docs`) with roadmap/benchmark pages and GitHub Pages deploy workflow (REL-010).
+74. Expanded benchmark harness CLI commands (`corpus`, `simulate`, `score`, `gate`, `trends`) for deterministic evaluation execution (EVAL-001 extension).
+75. Added explicit benchmark task corpus file with >=30 tasks across all required categories (`packages/benchmark/tasks/default-corpus.json`) (EVAL-002).
+76. Added greenfield template benchmark category coverage in corpus and simulation/scoring paths (EVAL-003).
+77. Added feature-add benchmark category coverage in corpus and simulation/scoring paths (EVAL-004).
+78. Added stack-trace bugfix benchmark category coverage in corpus and simulation/scoring paths (EVAL-005).
+79. Added 30-file and 100-file cross-file refactor benchmark category coverage in corpus and simulation/scoring paths (EVAL-006, EVAL-007).
+80. Added replay determinism benchmark category coverage and determinism KPI scoring in report generation (EVAL-008).
+81. Added regression budget scorer enforcing final zero-failure + bounded intermediate-failure policy checks (EVAL-010).
+82. Added persistent benchmark metrics store (`metrics.jsonl`) with append/read APIs for trendable historical KPI analysis (EVAL-011).
+83. Added desktop benchmark dashboard card with KPI table, gate status, metrics-history count, and trend alerts surface (EVAL-012, EVAL-013).
+84. Added benchmark regression gate CI workflow that simulates/scored runs and fails PRs when KPI gates regress (EVAL-014).
 
 ## Verification Commands
 

@@ -1,0 +1,74 @@
+name: open-core-publish
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Release tag (e.g. open-core-v0.1.0)
+        required: true
+        default: open-core-v0.1.0
+      npm_dist_tag:
+        description: npm dist-tag
+        required: true
+        default: beta
+      dry_run:
+        description: Dry run (skip npm publish)
+        required: true
+        default: true
+        type: boolean
+  push:
+    tags:
+      - "open-core-v*"
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  publish-open-core:
+    runs-on: ubuntu-latest
+    env:
+      NPM_CONFIG_PROVENANCE: true
+      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          registry-url: https://registry.npmjs.org
+      - name: Install dependencies
+        run: npm ci
+      - name: Validate repository
+        run: |
+          npm run lint
+          npm run test
+          npm run build
+      - name: Build open-core source archive
+        run: |
+          mkdir -p /tmp/open-core-release
+          git archive --format=tar.gz --output=/tmp/open-core-release/atlas-meridian-open-core.tar.gz HEAD
+      - name: Upload open-core archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: open-core-source
+          path: /tmp/open-core-release/atlas-meridian-open-core.tar.gz
+      - name: Publish open-core packages to npm
+        if: ${{ !inputs.dry_run && env.NPM_TOKEN != '' }}
+        run: |
+          echo "Publishing open-core packages with dist-tag '${{ inputs.npm_dist_tag || 'latest' }}'"
+          for pkg in packages/shared packages/policy-engine packages/indexer packages/agent-runtime packages/benchmark; do
+            if [ -f "$pkg/package.json" ]; then
+              echo "Publishing $pkg"
+              (cd "$pkg" && npm publish --access public --tag "${{ inputs.npm_dist_tag || 'latest' }}")
+            fi
+          done
+      - name: Dry-run publish preview
+        if: ${{ inputs.dry_run || env.NPM_TOKEN == '' }}
+        run: |
+          echo "Dry-run enabled or NPM_TOKEN missing; running npm pack previews"
+          for pkg in packages/shared packages/policy-engine packages/indexer packages/agent-runtime packages/benchmark; do
+            if [ -f "$pkg/package.json" ]; then
+              (cd "$pkg" && npm pack --dry-run)
+            fi
+          done

@@ -1,0 +1,290 @@
+[
+  {
+    "task_id": "greenfield_build-01",
+    "category": "greenfield_build",
+    "input": "Generate a Node microservice + Postgres stack with CI/docs [scenario 1]",
+    "expected_outcome": "Build pipeline green with required artifacts [scenario 1]",
+    "timeout_sec": 900,
+    "scorer": "time_to_green"
+  },
+  {
+    "task_id": "greenfield_build-02",
+    "category": "greenfield_build",
+    "input": "Generate a Node microservice + Postgres stack with CI/docs [scenario 2]",
+    "expected_outcome": "Build pipeline green with required artifacts [scenario 2]",
+    "timeout_sec": 900,
+    "scorer": "time_to_green"
+  },
+  {
+    "task_id": "greenfield_build-03",
+    "category": "greenfield_build",
+    "input": "Generate a Node microservice + Postgres stack with CI/docs [scenario 3]",
+    "expected_outcome": "Build pipeline green with required artifacts [scenario 3]",
+    "timeout_sec": 900,
+    "scorer": "time_to_green"
+  },
+  {
+    "task_id": "greenfield_build-04",
+    "category": "greenfield_build",
+    "input": "Generate a Node microservice + Postgres stack with CI/docs [scenario 4]",
+    "expected_outcome": "Build pipeline green with required artifacts [scenario 4]",
+    "timeout_sec": 900,
+    "scorer": "time_to_green"
+  },
+  {
+    "task_id": "greenfield_build-05",
+    "category": "greenfield_build",
+    "input": "Generate a Node microservice + Postgres stack with CI/docs [scenario 5]",
+    "expected_outcome": "Build pipeline green with required artifacts [scenario 5]",
+    "timeout_sec": 900,
+    "scorer": "time_to_green"
+  },
+  {
+    "task_id": "greenfield_build-06",
+    "category": "greenfield_build",
+    "input": "Generate a Node microservice + Postgres stack with CI/docs [scenario 6]",
+    "expected_outcome": "Build pipeline green with required artifacts [scenario 6]",
+    "timeout_sec": 900,
+    "scorer": "time_to_green"
+  },
+  {
+    "task_id": "feature_add-01",
+    "category": "feature_add",
+    "input": "Add feature with tests and docs [scenario 1]",
+    "expected_outcome": "Feature merged with all tests passing [scenario 1]",
+    "timeout_sec": 600,
+    "scorer": "feature_add"
+  },
+  {
+    "task_id": "feature_add-02",
+    "category": "feature_add",
+    "input": "Add feature with tests and docs [scenario 2]",
+    "expected_outcome": "Feature merged with all tests passing [scenario 2]",
+    "timeout_sec": 600,
+    "scorer": "feature_add"
+  },
+  {
+    "task_id": "feature_add-03",
+    "category": "feature_add",
+    "input": "Add feature with tests and docs [scenario 3]",
+    "expected_outcome": "Feature merged with all tests passing [scenario 3]",
+    "timeout_sec": 600,
+    "scorer": "feature_add"
+  },
+  {
+    "task_id": "feature_add-04",
+    "category": "feature_add",
+    "input": "Add feature with tests and docs [scenario 4]",
+    "expected_outcome": "Feature merged with all tests passing [scenario 4]",
+    "timeout_sec": 600,
+    "scorer": "feature_add"
+  },
+  {
+    "task_id": "feature_add-05",
+    "category": "feature_add",
+    "input": "Add feature with tests and docs [scenario 5]",
+    "expected_outcome": "Feature merged with all tests passing [scenario 5]",
+    "timeout_sec": 600,
+    "scorer": "feature_add"
+  },
+  {
+    "task_id": "feature_add-06",
+    "category": "feature_add",
+    "input": "Add feature with tests and docs [scenario 6]",
+    "expected_outcome": "Feature merged with all tests passing [scenario 6]",
+    "timeout_sec": 600,
+    "scorer": "feature_add"
+  },
+  {
+    "task_id": "stacktrace_bugfix-01",
+    "category": "stacktrace_bugfix",
+    "input": "Fix bug from stack trace and prevent regression [scenario 1]",
+    "expected_outcome": "Root cause fixed and regression test added [scenario 1]",
+    "timeout_sec": 480,
+    "scorer": "bugfix"
+  },
+  {
+    "task_id": "stacktrace_bugfix-02",
+    "category": "stacktrace_bugfix",
+    "input": "Fix bug from stack trace and prevent regression [scenario 2]",
+    "expected_outcome": "Root cause fixed and regression test added [scenario 2]",
+    "timeout_sec": 480,
+    "scorer": "bugfix"
+  },
+  {
+    "task_id": "stacktrace_bugfix-03",
+    "category": "stacktrace_bugfix",
+    "input": "Fix bug from stack trace and prevent regression [scenario 3]",
+    "expected_outcome": "Root cause fixed and regression test added [scenario 3]",
+    "timeout_sec": 480,
+    "scorer": "bugfix"
+  },
+  {
+    "task_id": "stacktrace_bugfix-04",
+    "category": "stacktrace_bugfix",
+    "input": "Fix bug from stack trace and prevent regression [scenario 4]",
+    "expected_outcome": "Root cause fixed and regression test added [scenario 4]",
+    "timeout_sec": 480,
+    "scorer": "bugfix"
+  },
+  {
+    "task_id": "stacktrace_bugfix-05",
+    "category": "stacktrace_bugfix",
+    "input": "Fix bug from stack trace and prevent regression [scenario 5]",
+    "expected_outcome": "Root cause fixed and regression test added [scenario 5]",
+    "timeout_sec": 480,
+    "scorer": "bugfix"
+  },
+  {
+    "task_id": "stacktrace_bugfix-06",
+    "category": "stacktrace_bugfix",
+    "input": "Fix bug from stack trace and prevent regression [scenario 6]",
+    "expected_outcome": "Root cause fixed and regression test added [scenario 6]",
+    "timeout_sec": 480,
+    "scorer": "bugfix"
+  },
+  {
+    "task_id": "refactor_30-01",
+    "category": "refactor_30",
+    "input": "Execute cross-file rename across 30 files [scenario 1]",
+    "expected_outcome": "Refactor lands with no regressions [scenario 1]",
+    "timeout_sec": 600,
+    "scorer": "refactor_30"
+  },
+  {
+    "task_id": "refactor_30-02",
+    "category": "refactor_30",
+    "input": "Execute cross-file rename across 30 files [scenario 2]",
+    "expected_outcome": "Refactor lands with no regressions [scenario 2]",
+    "timeout_sec": 600,
+    "scorer": "refactor_30"
+  },
+  {
+    "task_id": "refactor_30-03",
+    "category": "refactor_30",
+    "input": "Execute cross-file rename across 30 files [scenario 3]",
+    "expected_outcome": "Refactor lands with no regressions [scenario 3]",
+    "timeout_sec": 600,
+    "scorer": "refactor_30"
+  },
+  {
+    "task_id": "refactor_30-04",
+    "category": "refactor_30",
+    "input": "Execute cross-file rename across 30 files [scenario 4]",
+    "expected_outcome": "Refactor lands with no regressions [scenario 4]",
+    "timeout_sec": 600,
+    "scorer": "refactor_30"
+  },
+  {
+    "task_id": "refactor_30-05",
+    "category": "refactor_30",
+    "input": "Execute cross-file rename across 30 files [scenario 5]",
+    "expected_outcome": "Refactor lands with no regressions [scenario 5]",
+    "timeout_sec": 600,
+    "scorer": "refactor_30"
+  },
+  {
+    "task_id": "refactor_30-06",
+    "category": "refactor_30",
+    "input": "Execute cross-file rename across 30 files [scenario 6]",
+    "expected_outcome": "Refactor lands with no regressions [scenario 6]",
+    "timeout_sec": 600,
+    "scorer": "refactor_30"
+  },
+  {
+    "task_id": "refactor_100-01",
+    "category": "refactor_100",
+    "input": "Execute cross-file rename across 100 files [scenario 1]",
+    "expected_outcome": "Refactor lands with no regressions [scenario 1]",
+    "timeout_sec": 900,
+    "scorer": "refactor_100"
+  },
+  {
+    "task_id": "refactor_100-02",
+    "category": "refactor_100",
+    "input": "Execute cross-file rename across 100 files [scenario 2]",
+    "expected_outcome": "Refactor lands with no regressions [scenario 2]",
+    "timeout_sec": 900,
+    "scorer": "refactor_100"
+  },
+  {
+    "task_id": "refactor_100-03",
+    "category": "refactor_100",
+    "input": "Execute cross-file rename across 100 files [scenario 3]",
+    "expected_outcome": "Refactor lands with no regressions [scenario 3]",
+    "timeout_sec": 900,
+    "scorer": "refactor_100"
+  },
+  {
+    "task_id": "refactor_100-04",
+    "category": "refactor_100",
+    "input": "Execute cross-file rename across 100 files [scenario 4]",
+    "expected_outcome": "Refactor lands with no regressions [scenario 4]",
+    "timeout_sec": 900,
+    "scorer": "refactor_100"
+  },
+  {
+    "task_id": "refactor_100-05",
+    "category": "refactor_100",
+    "input": "Execute cross-file rename across 100 files [scenario 5]",
+    "expected_outcome": "Refactor lands with no regressions [scenario 5]",
+    "timeout_sec": 900,
+    "scorer": "refactor_100"
+  },
+  {
+    "task_id": "refactor_100-06",
+    "category": "refactor_100",
+    "input": "Execute cross-file rename across 100 files [scenario 6]",
+    "expected_outcome": "Refactor lands with no regressions [scenario 6]",
+    "timeout_sec": 900,
+    "scorer": "refactor_100"
+  },
+  {
+    "task_id": "replay_determinism-01",
+    "category": "replay_determinism",
+    "input": "Replay same task with same snapshot/settings [scenario 1]",
+    "expected_outcome": "Tool calls and diffs within determinism tolerance [scenario 1]",
+    "timeout_sec": 300,
+    "scorer": "determinism"
+  },
+  {
+    "task_id": "replay_determinism-02",
+    "category": "replay_determinism",
+    "input": "Replay same task with same snapshot/settings [scenario 2]",
+    "expected_outcome": "Tool calls and diffs within determinism tolerance [scenario 2]",
+    "timeout_sec": 300,
+    "scorer": "determinism"
+  },
+  {
+    "task_id": "replay_determinism-03",
+    "category": "replay_determinism",
+    "input": "Replay same task with same snapshot/settings [scenario 3]",
+    "expected_outcome": "Tool calls and diffs within determinism tolerance [scenario 3]",
+    "timeout_sec": 300,
+    "scorer": "determinism"
+  },
+  {
+    "task_id": "replay_determinism-04",
+    "category": "replay_determinism",
+    "input": "Replay same task with same snapshot/settings [scenario 4]",
+    "expected_outcome": "Tool calls and diffs within determinism tolerance [scenario 4]",
+    "timeout_sec": 300,
+    "scorer": "determinism"
+  },
+  {
+    "task_id": "replay_determinism-05",
+    "category": "replay_determinism",
+    "input": "Replay same task with same snapshot/settings [scenario 5]",
+    "expected_outcome": "Tool calls and diffs within determinism tolerance [scenario 5]",
+    "timeout_sec": 300,
+    "scorer": "determinism"
+  },
+  {
+    "task_id": "replay_determinism-06",
+    "category": "replay_determinism",
+    "input": "Replay same task with same snapshot/settings [scenario 6]",
+    "expected_outcome": "Tool calls and diffs within determinism tolerance [scenario 6]",
+    "timeout_sec": 300,
+    "scorer": "determinism"
+  }
+]

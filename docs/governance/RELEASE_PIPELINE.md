@@ -4,6 +4,10 @@
 
 - Build-only CI: `.github/workflows/desktop-build.yml`
 - Signed release CI: `.github/workflows/desktop-release.yml`
+- Open-core publishing: `.github/workflows/open-core-publish.yml`
+- Enterprise extension distribution: `.github/workflows/enterprise-extension-distribute.yml`
+- Benchmark gate: `.github/workflows/benchmark-gate.yml`
+- Public docs site deploy: `.github/workflows/docs-site.yml`
 
 ## Required Secrets
 

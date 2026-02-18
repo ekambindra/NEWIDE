@@ -65,6 +65,18 @@ import {
   resolveReleaseChannel,
   type ReleaseChannel
 } from "./updater.js";
+import {
+  appendMetricsStore,
+  buildTrendAlerts,
+  evaluateRegressionGate,
+  loadDefaultTaskCorpus,
+  readMetricsStore,
+  score,
+  simulateResults,
+  type BenchmarkResult as EvalBenchmarkResult,
+  type ScoreCard as EvalScoreCard,
+  type TrendAlert as EvalTrendAlert
+} from "@ide/benchmark";
 
 const execFileAsync = promisify(execFile);
 
@@ -339,6 +351,18 @@ type ControlPlanePushResult = {
   reason: string | null;
 };
 
+type BenchmarkDashboardReport = {
+  generatedAt: string;
+  corpusSize: number;
+  scoreCard: EvalScoreCard;
+  gate: {
+    pass: boolean;
+    failing: string[];
+  };
+  alerts: EvalTrendAlert[];
+  metricsHistoryCount: number;
+};
+
 const watchers = new Map<string, { watcher: FSWatcher; timer: NodeJS.Timeout | null }>();
 const terminalSessions = new Map<string, TerminalSession>();
 const workspaceIndexer = new SymbolIndexer();
@@ -375,6 +399,18 @@ function diffCheckpointRoot(): string {
 
 function patchSigningKeyPath(): string {
   return join(runtimeDataRoot(), "security", "patch-signing.key");
+}
+
+function benchmarkResultsPath(): string {
+  return join(runtimeDataRoot(), "benchmark", "latest-results.json");
+}
+
+function benchmarkReportPath(): string {
+  return join(runtimeDataRoot(), "benchmark", "latest-report.json");
+}
+
+function benchmarkMetricsPath(): string {
+  return join(runtimeDataRoot(), "benchmark", "metrics.jsonl");
 }
 
 function isWithin(root: string, target: string): boolean {
@@ -552,6 +588,76 @@ async function exportAudit(): Promise<{ path: string; count: number }> {
   await fs.writeFile(targetPath, content, "utf8");
   const count = content.trim() ? content.trim().split("\n").length : 0;
   return { path: targetPath, count };
+}
+
+async function readStoredBenchmarkResults(): Promise<EvalBenchmarkResult[] | null> {
+  const path = benchmarkResultsPath();
+  if (!existsSync(path)) {
+    return null;
+  }
+  try {
+    const raw = await fs.readFile(path, "utf8");
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) {
+      return null;
+    }
+    return parsed as EvalBenchmarkResult[];
+  } catch {
+    return null;
+  }
+}
+
+async function writeBenchmarkArtifacts(input: {
+  results: EvalBenchmarkResult[];
+  dashboard: BenchmarkDashboardReport;
+}): Promise<void> {
+  const resultsPath = benchmarkResultsPath();
+  const reportPath = benchmarkReportPath();
+  await fs.mkdir(dirname(resultsPath), { recursive: true });
+  await fs.writeFile(resultsPath, `${JSON.stringify(input.results, null, 2)}\n`, "utf8");
+  await fs.writeFile(reportPath, `${JSON.stringify(input.dashboard, null, 2)}\n`, "utf8");
+}
+
+async function buildBenchmarkDashboard(input?: {
+  results?: EvalBenchmarkResult[];
+  seed?: number;
+  runId?: string;
+}): Promise<BenchmarkDashboardReport> {
+  const corpus = loadDefaultTaskCorpus();
+  const results =
+    input?.results && input.results.length > 0
+      ? input.results
+      : simulateResults(corpus, input?.seed ?? Date.now());
+
+  const scoreCard = score(results, { runId: input?.runId ?? `benchmark-${Date.now()}` });
+  await appendMetricsStore(benchmarkMetricsPath(), scoreCard.metrics);
+  const history = await readMetricsStore(benchmarkMetricsPath());
+  const gate = evaluateRegressionGate(scoreCard);
+
+  return {
+    generatedAt: nowIso(),
+    corpusSize: corpus.length,
+    scoreCard,
+    gate: {
+      pass: gate.pass,
+      failing: gate.failing.map((entry) => entry.name)
+    },
+    alerts: buildTrendAlerts(history),
+    metricsHistoryCount: history.length
+  };
+}
+
+async function readBenchmarkDashboard(): Promise<BenchmarkDashboardReport | null> {
+  const path = benchmarkReportPath();
+  if (!existsSync(path)) {
+    return null;
+  }
+  try {
+    const raw = await fs.readFile(path, "utf8");
+    return JSON.parse(raw) as BenchmarkDashboardReport;
+  } catch {
+    return null;
+  }
 }
 
 async function readJsonArray<T>(path: string): Promise<T[]> {
@@ -3494,6 +3600,91 @@ app.whenReady().then(async () => {
       }
     });
     return result;
+  });
+
+  ipcMain.handle("benchmark:corpus", async () => {
+    return loadDefaultTaskCorpus();
+  });
+
+  ipcMain.handle(
+    "benchmark:run-simulated",
+    async (_event, payload?: { seed?: number; runId?: string }) => {
+      const { actor } = await requireAuthorization("workspace.read");
+      const corpus = loadDefaultTaskCorpus();
+      const results = simulateResults(corpus, Number(payload?.seed) || Date.now());
+      const dashboard = await buildBenchmarkDashboard({
+        results,
+        seed: payload?.seed,
+        runId: payload?.runId
+      });
+      await writeBenchmarkArtifacts({ results, dashboard });
+      await appendAuditEvent({
+        actor,
+        action: "benchmark.run.simulated",
+        target: dashboard.gate.pass ? "pass" : "fail",
+        decision: "executed",
+        reason: "simulated benchmark run completed",
+        metadata: {
+          corpus_size: dashboard.corpusSize,
+          total_tasks: dashboard.scoreCard.total,
+          pass_rate: dashboard.scoreCard.passRate,
+          gate_pass: dashboard.gate.pass,
+          failing_gates: dashboard.gate.failing
+        }
+      });
+      return dashboard;
+    }
+  );
+
+  ipcMain.handle(
+    "benchmark:score-results",
+    async (_event, payload: { results: EvalBenchmarkResult[]; runId?: string }) => {
+      const { actor } = await requireAuthorization("workspace.read");
+      const results = Array.isArray(payload.results) ? payload.results : [];
+      const dashboard = await buildBenchmarkDashboard({
+        results,
+        runId: payload.runId
+      });
+      await writeBenchmarkArtifacts({ results, dashboard });
+      await appendAuditEvent({
+        actor,
+        action: "benchmark.score.results",
+        target: dashboard.gate.pass ? "pass" : "fail",
+        decision: "executed",
+        reason: "benchmark results scored",
+        metadata: {
+          total_tasks: dashboard.scoreCard.total,
+          pass_rate: dashboard.scoreCard.passRate,
+          gate_pass: dashboard.gate.pass,
+          alerts: dashboard.alerts.length
+        }
+      });
+      return dashboard;
+    }
+  );
+
+  ipcMain.handle("benchmark:dashboard", async () => {
+    const stored = await readBenchmarkDashboard();
+    if (stored) {
+      return stored;
+    }
+    const prior = await readStoredBenchmarkResults();
+    const generated = simulateResults(loadDefaultTaskCorpus(), 1337);
+    const sourceResults = prior ?? generated;
+    const fallback = await buildBenchmarkDashboard({
+      results: sourceResults,
+      runId: "bootstrap-dashboard"
+    });
+    await writeBenchmarkArtifacts({
+      results: sourceResults,
+      dashboard: fallback
+    });
+    return fallback;
+  });
+
+  ipcMain.handle("benchmark:gate", async () => {
+    const dashboard = (await readBenchmarkDashboard()) ?? (await buildBenchmarkDashboard());
+    return dashboard.gate;
   });
 
   ipcMain.handle("checkpoints:list", async () => {

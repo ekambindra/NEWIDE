@@ -66,10 +66,16 @@ Project: Atlas Meridian (enterprise AI IDE)
 31. Added release workflow with macOS signing + notarization path and Windows signing path using CI secrets (`desktop-release.yml`) (REL-003, REL-004).
 32. Added runtime update channel support (stable/beta) with desktop controls for channel selection and update checks via new updater IPC APIs (REL-006).
 33. Added artifact provenance attestation in release workflow using `actions/attest-build-provenance` (REL-007).
+34. Added open-core publishing workflow (`open-core-publish.yml`) with validation, source archive generation, dry-run previews, and npm publish path for public core packages (REL-008).
+35. Added enterprise extension private package (`enterprise/extension`) and distribution workflow (`enterprise-extension-distribute.yml`) for restricted GitHub Packages release (REL-009).
+36. Added public docs site scaffold (`public-docs`) and GitHub Pages deployment workflow (`docs-site.yml`) with roadmap + benchmark pages (REL-010).
+37. Expanded benchmark harness package with deterministic corpus generation (>=30 tasks), richer scoring, KPI gate evaluator, regression budget scoring, metrics store, trend alerts, and simulation tooling (EVAL-002..EVAL-013).
+38. Added benchmark regression gate workflow (`benchmark-gate.yml`) that simulates/scored runs and blocks CI on KPI gate failures (EVAL-014).
+39. Added desktop benchmark dashboard integration with IPC handlers and UI card for corpus, KPI status, gate pass/fail, and trend alerts (EVAL-012).
 
 ## Current Progress Snapshot
-- Feature tracker currently records: 152/170 (89.4%).
-- In-progress areas include OSS/enterprise distribution workflows, public docs portal, and benchmark KPI regression gates.
+- Feature tracker currently records: 167/170 (98.2%).
+- In-progress areas include remaining UI hardening items: session restore, crash-safe error boundaries, and accessibility baseline polish.
 
 ## Continuation Rules
 1. Any new chat session must read this file first.
@@ -81,5 +87,6 @@ Project: Atlas Meridian (enterprise AI IDE)
 4. Never continue implementation before reading latest `chatN` continuity file.
 
 ## Immediate Next Tasks
-1. Continue release hardening: `REL-008..REL-010`.
-2. Continue evaluation expansion: `EVAL-002..EVAL-008`, `EVAL-010..EVAL-014`.
+1. Complete `UI-014`: workspace/session restore resilience (tabs, layout, editor splits, checkpoint context restoration).
+2. Complete `UI-015`: crash-safe renderer error boundaries with recovery affordances.
+3. Complete `UI-016`: accessibility baseline audit/fixes (labels, focus order, keyboard reachability, contrast validation).

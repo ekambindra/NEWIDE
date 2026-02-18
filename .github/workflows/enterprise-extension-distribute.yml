@@ -1,0 +1,53 @@
+name: enterprise-extension-distribute
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Enterprise extension version
+        required: true
+        default: 0.1.0
+      dry_run:
+        description: Dry run (skip publish)
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish-enterprise-extension:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://npm.pkg.github.com
+      - name: Set package version
+        run: |
+          cd enterprise/extension
+          npm version "${{ inputs.version }}" --no-git-tag-version
+      - name: Pack enterprise extension
+        run: |
+          cd enterprise/extension
+          npm pack
+      - name: Upload enterprise extension artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: enterprise-extension-package
+          path: enterprise/extension/*.tgz
+      - name: Publish to GitHub Packages (restricted)
+        if: ${{ !inputs.dry_run }}
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cd enterprise/extension
+          npm publish --access restricted
+      - name: Dry-run publish preview
+        if: ${{ inputs.dry_run }}
+        run: |
+          cd enterprise/extension
+          npm publish --dry-run

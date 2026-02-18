@@ -8,11 +8,15 @@
     ".": "./src/index.ts",
     "./cli": "./src/cli.ts"
   },
-  "files": ["dist", "src"],
+  "files": ["dist", "src", "README.md", "tasks", "fixtures"],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "test": "vitest run",
-    "lint": "tsc -p tsconfig.json --noEmit"
+    "lint": "tsc -p tsconfig.json --noEmit",
+    "corpus": "node dist/cli.js corpus --out tasks/default-corpus.json",
+    "simulate": "node dist/cli.js simulate --seed 1337 --out fixtures/latest-results.json",
+    "score:fixtures": "node dist/cli.js score fixtures/latest-results.json --history fixtures/metrics-history.jsonl --run-id fixture --out fixtures/latest-report.json",
+    "gate:fixtures": "node dist/cli.js gate fixtures/latest-report.json"
   },
   "dependencies": {
     "@ide/shared": "0.1.0"

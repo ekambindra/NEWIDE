@@ -418,6 +418,86 @@ type UpdateCheckResult = {
   } | null;
 };
 
+type BenchmarkTask = {
+  task_id: string;
+  category: string;
+  input: string;
+  expected_outcome: string;
+  timeout_sec: number;
+  scorer: string;
+};
+
+type BenchmarkResult = {
+  task: BenchmarkTask;
+  passed: boolean;
+  durationSec: number;
+  retries: number;
+  toolCalls: number;
+  diffChurn: number;
+  timeToGreenSec?: number;
+  determinismScore?: number;
+  replayMatched?: boolean;
+  filesTouched?: number;
+  groundedEditRatio?: number;
+  artifactCompleteness?: number;
+  fixLoopSucceeded?: boolean;
+  humanIntervention?: boolean;
+  failingTestsStart?: number;
+  failingTestsEnd?: number;
+  maxIntermediateFailingTests?: number;
+  indexFreshnessSmallMs?: number;
+  indexFreshnessBatchMs?: number;
+  checkpointIntegrity?: boolean;
+  nonDestructive?: boolean;
+  prReadinessScore?: number;
+  reviewerPrecision?: number;
+  decisionLogCoverage?: number;
+  inlineSuggestionLatencyMs?: number;
+};
+
+type BenchmarkDashboardReport = {
+  generatedAt: string;
+  corpusSize: number;
+  scoreCard: {
+    total: number;
+    passRate: number;
+    avgDuration: number;
+    avgRetries: number;
+    avgToolCalls: number;
+    avgDiffChurn: number;
+    avgTimeToGreen: number;
+    determinismRate: number;
+    groundedEditRatio: number;
+    fixLoopSuccessRate: number;
+    artifactCompleteness: number;
+    humanInterventionRate: number;
+    crossFileRefactorSuccess30: number;
+    crossFileRefactorSuccess100: number;
+    kpis: Array<{
+      name: string;
+      value: number;
+      target: number;
+      comparator: "gte" | "lte";
+      meetsTarget: boolean;
+      unit: string;
+    }>;
+  };
+  gate: {
+    pass: boolean;
+    failing: string[];
+  };
+  alerts: Array<{
+    metricName: string;
+    severity: "warning" | "critical";
+    direction: "increase" | "decrease";
+    deltaPercent: number;
+    baseline: number;
+    current: number;
+    message: string;
+  }>;
+  metricsHistoryCount: number;
+};
+
 type ProjectBuilderResult = {
   runId: string;
   template: "node_microservices_postgres";
@@ -798,6 +878,10 @@ export function App() {
   const [controlPlanePushResult, setControlPlanePushResult] = useState<ControlPlanePushResult | null>(null);
   const [releaseChannel, setReleaseChannel] = useState<ReleaseChannel>("stable");
   const [updateCheckResult, setUpdateCheckResult] = useState<UpdateCheckResult | null>(null);
+  const [benchmarkDashboard, setBenchmarkDashboard] = useState<BenchmarkDashboardReport | null>(null);
+  const [benchmarkCorpusSize, setBenchmarkCorpusSize] = useState(0);
+  const [benchmarkSeed, setBenchmarkSeed] = useState("1337");
+  const [benchmarkRunning, setBenchmarkRunning] = useState(false);
   const [autoSaveMode, setAutoSaveMode] = useState<"manual" | "afterDelay" | "onBlur">("manual");
   const dragRef = useRef<null | "left" | "right" | "bottom">(null);
 
@@ -901,6 +985,15 @@ export function App() {
     setReleaseChannel(result.channel);
   };
 
+  const refreshBenchmarkDashboard = async () => {
+    const [dashboard, corpus] = await Promise.all([
+      window.ide.getBenchmarkDashboard(),
+      window.ide.getBenchmarkCorpus()
+    ]);
+    setBenchmarkDashboard(dashboard);
+    setBenchmarkCorpusSize(corpus.length);
+  };
+
   useEffect(() => {
     const keydown = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
@@ -942,6 +1035,7 @@ export function App() {
     void refreshAuthState();
     void refreshEnterpriseSettings();
     void refreshReleaseChannel();
+    void refreshBenchmarkDashboard();
     void window.ide.startWatch(workspaceRoot);
     const unsubscribe = window.ide.onWorkspaceChanged(async () => {
       await refreshTree(workspaceRoot);
@@ -963,6 +1057,7 @@ export function App() {
     void refreshAuthState();
     void refreshEnterpriseSettings();
     void refreshReleaseChannel();
+    void refreshBenchmarkDashboard();
   }, []);
 
   useEffect(() => {
@@ -1757,6 +1852,31 @@ export function App() {
     }
   };
 
+  const runSimulatedBenchmark = async () => {
+    if (benchmarkRunning) {
+      return;
+    }
+    setBenchmarkRunning(true);
+    try {
+      const seed = Number(benchmarkSeed);
+      const report = await window.ide.runSimulatedBenchmark({
+        seed: Number.isFinite(seed) ? seed : 1337,
+        runId: `ui-benchmark-${Date.now()}`
+      });
+      setBenchmarkDashboard(report);
+      await refreshAudit();
+      setLogs((prev) => [
+        `[benchmark] total=${report.scoreCard.total} passRate=${(report.scoreCard.passRate * 100).toFixed(1)}% gate=${report.gate.pass ? "pass" : "fail"} alerts=${report.alerts.length}`,
+        ...prev
+      ]);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "benchmark run failed";
+      setLogs((prev) => [`[benchmark] run error: ${message}`, ...prev]);
+    } finally {
+      setBenchmarkRunning(false);
+    }
+  };
+
   const toggleAuthRole = (role: AuthRole) => {
     setAuthSelectedRoles((current) => {
       if (current.includes(role)) {
@@ -2526,6 +2646,51 @@ export function App() {
                     update check: channel={updateCheckResult.channel} skipped={String(updateCheckResult.skipped)} version={updateCheckResult.updateInfo?.version ?? "none"} reason={updateCheckResult.reason ?? "none"}
                   </code>
                 ) : null}
+              </div>
+              <div className="checkpoint-card">
+                <strong>Benchmark Dashboard (KPI + Regression Gates)</strong>
+                <div className="inline-search">
+                  <input
+                    value={benchmarkSeed}
+                    onChange={(event) => setBenchmarkSeed(event.target.value)}
+                    placeholder="Simulation seed"
+                  />
+                  <button
+                    onClick={() => { void runSimulatedBenchmark(); }}
+                    disabled={benchmarkRunning}
+                  >
+                    {benchmarkRunning ? "Running..." : "Run Simulated Benchmark"}
+                  </button>
+                  <button onClick={() => { void refreshBenchmarkDashboard(); }}>Refresh Dashboard</button>
+                </div>
+                {benchmarkDashboard ? (
+                  <>
+                    <code>
+                      generated: {benchmarkDashboard.generatedAt} | corpus: {benchmarkCorpusSize || benchmarkDashboard.corpusSize} | metrics history: {benchmarkDashboard.metricsHistoryCount}
+                    </code>
+                    <code>
+                      gate: {benchmarkDashboard.gate.pass ? "PASS" : "FAIL"} | failing: {benchmarkDashboard.gate.failing.join(", ") || "none"}
+                    </code>
+                    <code>
+                      pass rate: {(benchmarkDashboard.scoreCard.passRate * 100).toFixed(1)}% | avg duration: {benchmarkDashboard.scoreCard.avgDuration.toFixed(1)}s | determinism: {(benchmarkDashboard.scoreCard.determinismRate * 100).toFixed(1)}%
+                    </code>
+                    <code>
+                      grounded ratio: {(benchmarkDashboard.scoreCard.groundedEditRatio * 100).toFixed(2)}% | fix-loop success: {(benchmarkDashboard.scoreCard.fixLoopSuccessRate * 100).toFixed(1)}% | human intervention: {(benchmarkDashboard.scoreCard.humanInterventionRate * 100).toFixed(1)}%
+                    </code>
+                    {benchmarkDashboard.scoreCard.kpis.map((kpi) => (
+                      <code key={`kpi-${kpi.name}`}>
+                        {kpi.name}: {kpi.value.toFixed(4)} {kpi.unit} target {kpi.comparator} {kpi.target} [{kpi.meetsTarget ? "pass" : "fail"}]
+                      </code>
+                    ))}
+                    {benchmarkDashboard.alerts.slice(0, 5).map((alert, index) => (
+                      <code key={`alert-${index}-${alert.metricName}`}>
+                        alert {alert.severity}: {alert.message} (baseline={alert.baseline.toFixed(4)} current={alert.current.toFixed(4)})
+                      </code>
+                    ))}
+                  </>
+                ) : (
+                  <p className="empty">No benchmark dashboard yet.</p>
+                )}
               </div>
               {pendingApprovalCommand ? (
                 <div className="checkpoint-card">

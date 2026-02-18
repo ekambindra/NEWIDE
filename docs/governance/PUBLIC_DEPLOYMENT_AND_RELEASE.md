@@ -4,6 +4,8 @@
 
 - Open-core public repository (Apache-2.0 core)
 - Enterprise extensions delivered privately
+- Open-core publish workflow: `.github/workflows/open-core-publish.yml`
+- Enterprise extension distribution workflow: `.github/workflows/enterprise-extension-distribute.yml`
 
 ## Cloud Target
 
@@ -29,6 +31,8 @@
 - GitHub Actions for lint/test/build
 - Implemented provenance attestations in release workflow
 - Implemented release workflows for signed desktop artifacts
+- Implemented benchmark regression gate workflow: `.github/workflows/benchmark-gate.yml`
+- Implemented docs site deploy workflow: `.github/workflows/docs-site.yml`
 
 ## Telemetry and Privacy
 

@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Atlas Meridian Benchmark Guide</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <header>
+      <h1>Benchmark Guide</h1>
+      <p>How Atlas Meridian evaluates autonomy, determinism, and enterprise reliability.</p>
+    </header>
+    <main>
+      <section class="card">
+        <h2>Corpus Categories</h2>
+        <ul>
+          <li>Greenfield builds</li>
+          <li>Feature additions</li>
+          <li>Stack-trace bug fixes</li>
+          <li>30-file refactors</li>
+          <li>100-file refactors</li>
+          <li>Replay determinism checks</li>
+        </ul>
+      </section>
+
+      <section class="card">
+        <h2>Regression Gate</h2>
+        <p>CI enforces KPI gates from benchmark reports. Regressions fail the benchmark workflow.</p>
+        <p>Reference workflow: <code>.github/workflows/benchmark-gate.yml</code></p>
+      </section>
+
+      <p><a href="./index.html">Back to docs home</a></p>
+    </main>
+  </body>
+</html>

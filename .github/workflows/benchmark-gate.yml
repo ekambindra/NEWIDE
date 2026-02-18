@@ -1,0 +1,35 @@
+name: benchmark-gate
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  benchmark-regression-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Build benchmark package
+        run: npm run build --workspace @ide/benchmark
+      - name: Generate deterministic benchmark run
+        run: |
+          node packages/benchmark/dist/cli.js simulate --seed 1337 --out /tmp/benchmark-results.json
+          node packages/benchmark/dist/cli.js score /tmp/benchmark-results.json --history /tmp/benchmark-history.jsonl --run-id ci-${GITHUB_SHA} --out /tmp/benchmark-report.json
+      - name: Enforce benchmark regression gate
+        run: node packages/benchmark/dist/cli.js gate /tmp/benchmark-report.json
+      - name: Upload benchmark artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-report
+          path: |
+            /tmp/benchmark-results.json
+            /tmp/benchmark-report.json
+            /tmp/benchmark-history.jsonl
