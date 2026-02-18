@@ -11,7 +11,7 @@ Tag: `v0.1.0`
 
 ## Validation Evidence
 
-- Desktop stable signed release: https://github.com/ekambindra/atlas-meridian/actions/runs/22127232444
+- Desktop stable signed release: https://github.com/ekambindra/atlas-meridian/actions/runs/22127466297
 - Benchmark artifacts: `public-docs/benchmark-artifacts/ga-20260218T050504Z-seed1337/`
 - GA signoff record: `docs/governance/GA_SIGNOFF_RECORD_2026-02-18_v0.1.0.md`
 

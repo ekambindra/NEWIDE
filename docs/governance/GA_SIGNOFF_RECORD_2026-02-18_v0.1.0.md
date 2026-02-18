@@ -10,7 +10,7 @@
 - `desktop-build`: [run 22127407083](https://github.com/ekambindra/atlas-meridian/actions/runs/22127407083) - success
 - `benchmark-gate`: [run 22127407063](https://github.com/ekambindra/atlas-meridian/actions/runs/22127407063) - success
 - `docs-site`: [run 22127407085](https://github.com/ekambindra/atlas-meridian/actions/runs/22127407085) - success
-- `desktop-release (stable, signed)`: [run 22127232444](https://github.com/ekambindra/atlas-meridian/actions/runs/22127232444) - success
+- `desktop-release (stable, signed)`: [run 22127466297](https://github.com/ekambindra/atlas-meridian/actions/runs/22127466297) - success
 
 ## Reliability
 
@@ -54,13 +54,13 @@ From `packages/benchmark/fixtures/latest-report.json` generated `2026-02-18T05:0
 
 1. macOS and Windows installers built and signed.
    - Status: `PASS`
-   - Evidence: `desktop-release` run 22127232444, both OS jobs success.
+   - Evidence: `desktop-release` run 22127466297, both OS jobs success.
 2. Stable update channel points to latest GA artifacts.
    - Status: `PASS`
    - Evidence: release workflow executed with `channel=stable`; artifacts produced for both OS jobs.
 3. Provenance attestations generated.
    - Status: `PASS`
-   - Evidence: `Attest macOS artifacts` and `Attest Windows artifacts` steps succeeded in run 22127232444.
+   - Evidence: `Attest macOS artifacts` and `Attest Windows artifacts` steps succeeded in run 22127466297.
 4. Rollback path tested (desktop updater + control plane blue/green).
    - Status: `CONDITIONAL`
    - Evidence: runbook exists; explicit live rollback drill not executed in this session.
