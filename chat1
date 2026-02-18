@@ -35,9 +35,12 @@ Project: Atlas Meridian (enterprise AI IDE)
    - diff checkpoint flow now stores grounding evidence artifact and evidence count.
    - UI now displays grounding evidence count per diff checkpoint.
 2. Added chat continuity protocol files so new sessions can continue with full context.
+3. Added index freshness target gate computation and diagnostics/audit exposure (IDX-007).
+4. Added module summary generation in index pipeline and diagnostics UI (IDX-009).
+5. Added retrieval priority scoring with query + token budget context selection in index diagnostics (IDX-012).
 
 ## Current Progress Snapshot
-- Feature tracker currently records: 119/170 (70.0%).
+- Feature tracker currently records: 122/170 (71.8%).
 - In-progress areas include advanced indexing, autonomy builder extensions, enterprise SSO/RBAC/security layers, release hardening, and full benchmark KPIs.
 
 ## Continuation Rules
@@ -50,6 +53,6 @@ Project: Atlas Meridian (enterprise AI IDE)
 4. Never continue implementation before reading latest `chatN` continuity file.
 
 ## Immediate Next Tasks
-1. Continue next in-progress features: IDX-007/IDX-009/IDX-012/IDX-014 and AUTO-017/AUTO-018.
+1. Continue next in-progress features: IDX-005/IDX-014 and AUTO-017/AUTO-018.
 2. Continue enterprise/public release pipeline milestones.
 3. Keep extending benchmark/KPI gates and regression-blocking CI behavior.

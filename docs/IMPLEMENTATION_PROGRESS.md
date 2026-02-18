@@ -2,8 +2,8 @@
 
 ## Current Completion
 
-- Completed features: 119/170
-- Completion percentage: 70.0%
+- Completed features: 122/170
+- Completion percentage: 71.8%
 
 ## Latest Implemented Increments
 
@@ -44,6 +44,9 @@
 35. Green pipeline guarantee checker with pass-rate KPI computation and target evaluation (AUTO-016).
 36. Grounding evidence generation for diff edits with per-line hashed evidence artifacts and checkpoint/UI surfacing (IDX-011).
 37. Session continuity protocol and rolling `chatN` handoff files to preserve implementation state across context windows.
+38. Index freshness target evaluation with explicit small/batch latency pass/fail gating surfaced in diagnostics and audit metadata (IDX-007).
+39. Module summary generation from symbol inventory with dominant kind distribution and concise per-module synopsis in diagnostics UI (IDX-009).
+40. Retrieval priority scoring + context selection using query terms, parse health, symbol density, and token-budgeted selection output (IDX-012).
 
 ## Verification Commands
 

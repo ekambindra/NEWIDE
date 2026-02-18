@@ -141,11 +141,41 @@ type WorkspaceIndexReport = {
       error: string | null;
     }>;
   };
+  freshnessTargets: {
+    smallTargetMs: number;
+    batchTargetMs: number;
+    observedSmallMs: number | null;
+    observedBatchMs: number | null;
+    smallWithinTarget: boolean | null;
+    batchWithinTarget: boolean | null;
+    meetsTarget: boolean;
+  };
   repoMap: Array<{
     file: string;
     symbols: number;
     imports: string[];
   }>;
+  moduleSummaries: Array<{
+    file: string;
+    symbolCount: number;
+    importCount: number;
+    topKinds: string[];
+    topSymbols: string[];
+    summary: string;
+  }>;
+  retrieval: {
+    query: string;
+    tokenBudget: number;
+    budgetUsed: number;
+    files: string[];
+    candidates: Array<{
+      file: string;
+      score: number;
+      matchedTerms: number;
+      symbolCount: number;
+      parseHealthy: boolean;
+    }>;
+  };
   topFiles: Array<{
     file: string;
     symbols: number;
@@ -331,6 +361,8 @@ const api = {
   runWorkspaceIndex: (payload: {
     root: string;
     limit?: number;
+    query?: string;
+    tokenBudget?: number;
   }): Promise<WorkspaceIndexReport> => ipcRenderer.invoke("indexer:run", payload),
   getWorkspaceIndexDiagnostics: (root: string): Promise<WorkspaceIndexReport> =>
     ipcRenderer.invoke("indexer:diagnostics", root),

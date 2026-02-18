@@ -15,7 +15,10 @@ import { AgentRuntime } from "@ide/agent-runtime";
 import {
   SymbolIndexer,
   buildGroundingEvidence,
+  evaluateFreshnessTargets,
   type IndexerDiagnostics,
+  type FreshnessTargetReport,
+  type ModuleSummary,
   type RepoMapEntry
 } from "@ide/indexer";
 import ts from "typescript";
@@ -237,7 +240,22 @@ type WorkspaceIndexReport = {
   root: string;
   generatedAt: string;
   diagnostics: IndexerDiagnostics;
+  freshnessTargets: FreshnessTargetReport;
   repoMap: RepoMapEntry[];
+  moduleSummaries: ModuleSummary[];
+  retrieval: {
+    query: string;
+    tokenBudget: number;
+    budgetUsed: number;
+    files: string[];
+    candidates: Array<{
+      file: string;
+      score: number;
+      matchedTerms: number;
+      symbolCount: number;
+      parseHealthy: boolean;
+    }>;
+  };
   topFiles: Array<{
     file: string;
     symbols: number;
@@ -1197,17 +1215,31 @@ async function discoverIndexableFiles(root: string, limit: number): Promise<stri
   }
 }
 
-async function runWorkspaceIndex(root: string, limit = 1200): Promise<WorkspaceIndexReport> {
+async function runWorkspaceIndex(
+  root: string,
+  limit = 1200,
+  query = "",
+  tokenBudget = 4000
+): Promise<WorkspaceIndexReport> {
   const files = await discoverIndexableFiles(root, limit);
   const absoluteFiles = files.map((file) => resolve(root, file));
   await workspaceIndexer.indexFiles(root, absoluteFiles);
 
   const diagnostics = workspaceIndexer.diagnostics();
+  const freshnessTargets = evaluateFreshnessTargets(diagnostics);
   const fileMap = new Map(diagnostics.files.map((diag) => [normalizeRepoPath(diag.file), diag]));
   const repoMap = workspaceIndexer
     .repoMap()
     .filter((entry) => files.includes(normalizeRepoPath(entry.file)))
     .sort((a, b) => b.symbols - a.symbols);
+  const moduleSummaries = workspaceIndexer
+    .moduleSummaries(40)
+    .filter((entry) => files.includes(normalizeRepoPath(entry.file)));
+  const retrieval = workspaceIndexer.retrievalContext(
+    query,
+    Math.max(300, Math.min(12000, Number(tokenBudget) || 4000)),
+    25
+  );
 
   const topFiles = repoMap.slice(0, 20).map((entry) => {
     const diag = fileMap.get(normalizeRepoPath(entry.file));
@@ -1224,7 +1256,16 @@ async function runWorkspaceIndex(root: string, limit = 1200): Promise<WorkspaceI
     root,
     generatedAt: nowIso(),
     diagnostics,
+    freshnessTargets,
     repoMap,
+    moduleSummaries,
+    retrieval: {
+      query: retrieval.query,
+      tokenBudget: retrieval.tokenBudget,
+      budgetUsed: retrieval.selected.budgetUsed,
+      files: retrieval.selected.files,
+      candidates: retrieval.candidates
+    },
     topFiles
   };
   workspaceIndexReports.set(root, report);
@@ -2527,8 +2568,16 @@ app.whenReady().then(async () => {
 
   ipcMain.handle(
     "indexer:run",
-    async (_event, payload: { root: string; limit?: number }): Promise<WorkspaceIndexReport> => {
-      const report = await runWorkspaceIndex(payload.root, payload.limit ?? 1200);
+    async (
+      _event,
+      payload: { root: string; limit?: number; query?: string; tokenBudget?: number }
+    ): Promise<WorkspaceIndexReport> => {
+      const report = await runWorkspaceIndex(
+        payload.root,
+        payload.limit ?? 1200,
+        payload.query ?? "",
+        payload.tokenBudget ?? 4000
+      );
       await appendAuditEvent({
         action: "indexer.run",
         target: payload.root,
@@ -2537,7 +2586,10 @@ app.whenReady().then(async () => {
         metadata: {
           indexed_files: report.diagnostics.indexedFiles,
           total_symbols: report.diagnostics.totalSymbols,
-          parse_errors: report.diagnostics.parseErrors
+          parse_errors: report.diagnostics.parseErrors,
+          freshness_small_within_target: report.freshnessTargets.smallWithinTarget,
+          freshness_batch_within_target: report.freshnessTargets.batchWithinTarget,
+          retrieval_candidates: report.retrieval.candidates.length
         }
       });
       return report;
@@ -2549,7 +2601,7 @@ app.whenReady().then(async () => {
     if (existing) {
       return existing;
     }
-    return runWorkspaceIndex(root, 1200);
+    return runWorkspaceIndex(root, 1200, "", 4000);
   });
 
   ipcMain.handle(

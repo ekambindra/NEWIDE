@@ -18,6 +18,40 @@ export type RepoMapEntry = {
   imports: string[];
 };
 
+export type ModuleSummary = {
+  file: string;
+  symbolCount: number;
+  importCount: number;
+  topKinds: string[];
+  topSymbols: string[];
+  summary: string;
+};
+
+export type FreshnessTargetReport = {
+  smallTargetMs: number;
+  batchTargetMs: number;
+  observedSmallMs: number | null;
+  observedBatchMs: number | null;
+  smallWithinTarget: boolean | null;
+  batchWithinTarget: boolean | null;
+  meetsTarget: boolean;
+};
+
+export type RetrievalCandidate = {
+  file: string;
+  score: number;
+  matchedTerms: number;
+  symbolCount: number;
+  parseHealthy: boolean;
+};
+
+export type RetrievalContextReport = {
+  query: string;
+  tokenBudget: number;
+  selected: ContextSelection;
+  candidates: RetrievalCandidate[];
+};
+
 export type ParserMode = "tree_sitter" | "typescript_ast" | "regex_fallback";
 
 export type FileIndexDiagnostics = {
@@ -210,11 +244,97 @@ export class SymbolIndexer {
   }
 
   repoMap(): RepoMapEntry[] {
-    return [...this.symbolsByFile.entries()].map(([file, symbols]) => ({
-      file,
+    return [...this.symbolsByFile.entries()].map(([filePath, symbols]) => ({
+      file: symbols[0]?.file ?? normalizeRepoPath(filePath),
       symbols: symbols.length,
       imports: symbols.filter((symbol) => symbol.kind === "import").map((symbol) => symbol.name)
     }));
+  }
+
+  moduleSummaries(limit = 100): ModuleSummary[] {
+    const summaries = [...this.symbolsByFile.entries()].map(([filePath, symbols]) => {
+      const file = symbols[0]?.file ?? normalizeRepoPath(filePath);
+      const byKind = new Map<string, number>();
+      for (const symbol of symbols) {
+        byKind.set(symbol.kind, (byKind.get(symbol.kind) ?? 0) + 1);
+      }
+      const topKinds = [...byKind.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 3)
+        .map(([kind, count]) => `${kind}:${count}`);
+      const topSymbols = symbols
+        .filter((symbol) => symbol.kind !== "import")
+        .slice(0, 4)
+        .map((symbol) => symbol.name);
+      const importCount = symbols.filter((symbol) => symbol.kind === "import").length;
+
+      return {
+        file,
+        symbolCount: symbols.length,
+        importCount,
+        topKinds,
+        topSymbols,
+        summary: `${file} has ${symbols.length} symbols, ${importCount} imports; dominant kinds: ${
+          topKinds.join(", ") || "none"
+        }`
+      };
+    });
+
+    return summaries
+      .sort((a, b) => b.symbolCount - a.symbolCount)
+      .slice(0, Math.max(1, limit));
+  }
+
+  retrievalContext(query: string, tokenBudget: number, limit = 20): RetrievalContextReport {
+    const terms = tokenizeQuery(query);
+    const diagnostics = new Map(
+      this.fileDiagnostics().map((diag) => [normalizeRepoPath(diag.file), diag])
+    );
+
+    const candidates = this.moduleSummaries(500).map((summary) => {
+      const diag = diagnostics.get(normalizeRepoPath(summary.file));
+      const parseHealthy = diag?.error === null;
+      const searchText = `${summary.file} ${summary.topSymbols.join(" ")} ${summary.topKinds.join(" ")}`.toLowerCase();
+      const matchedTerms = terms.reduce((count, term) => count + (searchText.includes(term) ? 1 : 0), 0);
+      const score =
+        matchedTerms * 3 +
+        Math.log1p(summary.symbolCount) +
+        Math.min(2, summary.importCount * 0.15) +
+        (parseHealthy ? 1 : 0.25);
+
+      return {
+        file: summary.file,
+        score: Number(score.toFixed(4)),
+        matchedTerms,
+        symbolCount: summary.symbolCount,
+        parseHealthy
+      };
+    });
+
+    const ranked = candidates
+      .sort((a, b) => b.score - a.score)
+      .slice(0, Math.max(1, limit));
+
+    const symbolOrder = new Map(
+      ranked.map((candidate, idx) => [normalizeRepoPath(candidate.file), idx])
+    );
+    const rankedSymbols = [...this.symbolsByFile.values()]
+      .flat()
+      .sort((a, b) => {
+        const aRank = symbolOrder.get(normalizeRepoPath(a.file)) ?? Number.MAX_SAFE_INTEGER;
+        const bRank = symbolOrder.get(normalizeRepoPath(b.file)) ?? Number.MAX_SAFE_INTEGER;
+        if (aRank !== bRank) {
+          return aRank - bRank;
+        }
+        return a.range.start - b.range.start;
+      });
+
+    return {
+      query,
+      tokenBudget,
+      selected: buildContext(rankedSymbols, tokenBudget),
+      candidates: ranked
+    };
   }
 
   private extractWithParserPipeline(
@@ -518,6 +638,38 @@ export type ContextSelection = {
   symbols: IndexSymbol[];
   budgetUsed: number;
 };
+
+export function evaluateFreshnessTargets(
+  diagnostics: Pick<IndexerDiagnostics, "freshnessLatencyMs" | "batchLatencyMs">,
+  smallTargetMs = 200,
+  batchTargetMs = 2000
+): FreshnessTargetReport {
+  const observedSmallMs = diagnostics.freshnessLatencyMs;
+  const observedBatchMs = diagnostics.batchLatencyMs;
+  const smallWithinTarget =
+    typeof observedSmallMs === "number" ? observedSmallMs <= smallTargetMs : null;
+  const batchWithinTarget =
+    typeof observedBatchMs === "number" ? observedBatchMs <= batchTargetMs : null;
+
+  return {
+    smallTargetMs,
+    batchTargetMs,
+    observedSmallMs,
+    observedBatchMs,
+    smallWithinTarget,
+    batchWithinTarget,
+    meetsTarget: smallWithinTarget !== false && batchWithinTarget !== false
+  };
+}
+
+function tokenizeQuery(query: string): string[] {
+  return query
+    .toLowerCase()
+    .split(/[^a-z0-9_]+/g)
+    .map((term) => term.trim())
+    .filter((term) => term.length >= 2)
+    .slice(0, 12);
+}
 
 export function buildContext(symbols: IndexSymbol[], tokenBudget: number): ContextSelection {
   let budget = 0;

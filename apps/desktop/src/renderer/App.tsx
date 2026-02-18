@@ -240,11 +240,41 @@ type WorkspaceIndexReport = {
       error: string | null;
     }>;
   };
+  freshnessTargets: {
+    smallTargetMs: number;
+    batchTargetMs: number;
+    observedSmallMs: number | null;
+    observedBatchMs: number | null;
+    smallWithinTarget: boolean | null;
+    batchWithinTarget: boolean | null;
+    meetsTarget: boolean;
+  };
   repoMap: Array<{
     file: string;
     symbols: number;
     imports: string[];
   }>;
+  moduleSummaries: Array<{
+    file: string;
+    symbolCount: number;
+    importCount: number;
+    topKinds: string[];
+    topSymbols: string[];
+    summary: string;
+  }>;
+  retrieval: {
+    query: string;
+    tokenBudget: number;
+    budgetUsed: number;
+    files: string[];
+    candidates: Array<{
+      file: string;
+      score: number;
+      matchedTerms: number;
+      symbolCount: number;
+      parseHealthy: boolean;
+    }>;
+  };
   topFiles: Array<{
     file: string;
     symbols: number;
@@ -546,6 +576,8 @@ export function App() {
   const [allowFullRewriteApply, setAllowFullRewriteApply] = useState(false);
   const [indexReport, setIndexReport] = useState<WorkspaceIndexReport | null>(null);
   const [indexLimit, setIndexLimit] = useState("1200");
+  const [indexQuery, setIndexQuery] = useState("agent runtime checkpoints");
+  const [indexTokenBudget, setIndexTokenBudget] = useState("4000");
   const [artifactReport, setArtifactReport] = useState<ArtifactCompletenessReport | null>(null);
   const [greenPipelineReport, setGreenPipelineReport] = useState<GreenPipelineReport | null>(null);
   const [autoSaveMode, setAutoSaveMode] = useState<"manual" | "afterDelay" | "onBlur">("manual");
@@ -958,13 +990,16 @@ export function App() {
       return;
     }
     const limit = Math.max(50, Math.min(5000, Number(indexLimit) || 1200));
+    const tokenBudget = Math.max(300, Math.min(12000, Number(indexTokenBudget) || 4000));
     const report = await window.ide.runWorkspaceIndex({
       root: workspaceRoot,
-      limit
+      limit,
+      query: indexQuery.trim(),
+      tokenBudget
     });
     setIndexReport(report as WorkspaceIndexReport);
     setLogs((prev) => [
-      `[indexer] files=${report.diagnostics.indexedFiles} symbols=${report.diagnostics.totalSymbols} errors=${report.diagnostics.parseErrors}`,
+      `[indexer] files=${report.diagnostics.indexedFiles} symbols=${report.diagnostics.totalSymbols} errors=${report.diagnostics.parseErrors} freshness_target=${report.freshnessTargets.meetsTarget ? "pass" : "fail"}`,
       ...prev
     ]);
     await refreshAudit();
@@ -1670,8 +1705,20 @@ export function App() {
                     onChange={(event) => setIndexLimit(event.target.value)}
                     placeholder="Index file limit"
                   />
+                  <input
+                    value={indexTokenBudget}
+                    onChange={(event) => setIndexTokenBudget(event.target.value)}
+                    placeholder="Token budget"
+                  />
                   <button onClick={() => { void runWorkspaceIndexScan(); }}>Run Index Scan</button>
                   <button onClick={() => { void refreshIndexDiagnostics(); }}>Refresh Diagnostics</button>
+                </div>
+                <div className="inline-search" style={{ marginBottom: 8 }}>
+                  <input
+                    value={indexQuery}
+                    onChange={(event) => setIndexQuery(event.target.value)}
+                    placeholder="Retrieval query"
+                  />
                 </div>
                 {indexReport ? (
                   <>
@@ -1679,10 +1726,26 @@ export function App() {
                     <code>pipeline: {indexReport.diagnostics.parserPipeline} | tree-sitter: {indexReport.diagnostics.treeSitterAvailable ? "available" : "fallback"}</code>
                     <code>files: {indexReport.diagnostics.indexedFiles} | symbols: {indexReport.diagnostics.totalSymbols} | errors: {indexReport.diagnostics.parseErrors}</code>
                     <code>freshness(ms): {indexReport.diagnostics.freshnessLatencyMs ?? 0} | batch(ms): {indexReport.diagnostics.batchLatencyMs ?? 0}</code>
+                    <code>
+                      freshness target: small&lt;={indexReport.freshnessTargets.smallTargetMs}ms ({String(indexReport.freshnessTargets.smallWithinTarget)}) | batch&lt;={indexReport.freshnessTargets.batchTargetMs}ms ({String(indexReport.freshnessTargets.batchWithinTarget)}) | overall={indexReport.freshnessTargets.meetsTarget ? "pass" : "fail"}
+                    </code>
                     {indexReport.diagnostics.treeSitterReason ? <span>{indexReport.diagnostics.treeSitterReason}</span> : null}
                     {indexReport.topFiles.slice(0, 8).map((item) => (
                       <code key={`idx-${item.file}`}>
                         {item.file} | symbols={item.symbols} | parser={item.parserMode} | latency={item.latencyMs}ms
+                      </code>
+                    ))}
+                    <code>
+                      retrieval: query="{indexReport.retrieval.query}" | budget={indexReport.retrieval.budgetUsed}/{indexReport.retrieval.tokenBudget} | files={indexReport.retrieval.files.length}
+                    </code>
+                    {indexReport.retrieval.candidates.slice(0, 5).map((candidate) => (
+                      <code key={`retr-${candidate.file}`}>
+                        rank {candidate.file} | score={candidate.score.toFixed(2)} | terms={candidate.matchedTerms} | symbols={candidate.symbolCount}
+                      </code>
+                    ))}
+                    {indexReport.moduleSummaries.slice(0, 4).map((summary) => (
+                      <code key={`mod-${summary.file}`}>
+                        module {summary.file} | {summary.summary}
                       </code>
                     ))}
                   </>
