@@ -112,3 +112,7 @@ Project: Atlas Meridian (enterprise AI IDE)
    - `docs/governance/GA_SIGNOFF_CHECKLIST.md`
 5. Ran markdown internal-link audit across all `.md` files:
    - result: `BROKEN_LINKS=0`.
+6. Verified remote CI after workflow fix:
+   - `docs-site` now passes on push even when Pages is not enabled.
+   - `ci`, `benchmark-gate`, and `desktop-build` also passed for commit `e4cdd95`.
+7. Replaced stale `docs/MASTER_PROMPT.md` with a production-operations prompt aligned to current completed state.

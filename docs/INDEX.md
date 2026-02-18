@@ -11,6 +11,7 @@ This repository stores the full implementation plan, prompts, contracts, milesto
 
 ## Prompt Engineering
 
+- [Master Operations Prompt](./MASTER_PROMPT.md)
 - [Master Execution Prompt](./prompts/MASTER_EXECUTION_PROMPT.md)
 - [Multi-Agent Coordinator Prompt](./prompts/MULTI_AGENT_COORDINATOR_PROMPT.md)
 
