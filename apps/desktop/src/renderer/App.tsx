@@ -1,5 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { defaultLayout, loadLayout, saveLayout, type LayoutState } from "./layout";
+import {
+  loadSessionSnapshot,
+  saveSessionSnapshot,
+  type SessionSnapshot,
+  type SessionTabSnapshot
+} from "./session";
 
 type TreeNode = {
   name: string;
@@ -729,10 +735,44 @@ function detectSensitivePathSignals(path: string): string[] {
   return signals;
 }
 
-class AppErrorBoundary extends Error {
-  constructor(public readonly original: unknown) {
-    super("App crashed");
-  }
+function toSessionTabSnapshot(tab: Tab): SessionTabSnapshot {
+  return {
+    path: tab.path,
+    binary: tab.binary,
+    dirty: tab.dirty,
+    content: tab.dirty ? tab.content : "",
+    originalContent: tab.dirty ? tab.originalContent : ""
+  };
+}
+
+function buildSessionSnapshot(input: {
+  workspaceRoot: string | null;
+  tabs: Tab[];
+  activeTab: string | null;
+  secondTab: string | null;
+  splitEnabled: boolean;
+  leftTab: LeftTab;
+  panelTab: PanelTab;
+  bottomTab: BottomTab;
+  autoSaveMode: "manual" | "afterDelay" | "onBlur";
+  searchText: string;
+  terminalInput: string;
+}): SessionSnapshot {
+  return {
+    version: 1,
+    updatedAt: new Date().toISOString(),
+    workspaceRoot: input.workspaceRoot,
+    tabs: input.tabs.map(toSessionTabSnapshot),
+    activeTab: input.activeTab,
+    secondTab: input.secondTab,
+    splitEnabled: input.splitEnabled,
+    leftTab: input.leftTab,
+    panelTab: input.panelTab,
+    bottomTab: input.bottomTab,
+    autoSaveMode: input.autoSaveMode,
+    searchText: input.searchText,
+    terminalInput: input.terminalInput
+  };
 }
 
 export function App() {
@@ -884,6 +924,7 @@ export function App() {
   const [benchmarkRunning, setBenchmarkRunning] = useState(false);
   const [autoSaveMode, setAutoSaveMode] = useState<"manual" | "afterDelay" | "onBlur">("manual");
   const dragRef = useRef<null | "left" | "right" | "bottom">(null);
+  const sessionHydratedRef = useRef(false);
 
   const active = useMemo(() => tabs.find((tab) => tab.path === activeTab) ?? null, [tabs, activeTab]);
   const secondary = useMemo(() => tabs.find((tab) => tab.path === secondTab) ?? null, [tabs, secondTab]);
@@ -899,6 +940,7 @@ export function App() {
     () => (active ? detectSensitivePathSignals(active.path) : []),
     [active]
   );
+  const accessibilityStatus = useMemo(() => logs[0] ?? "Atlas Meridian ready", [logs]);
 
   const refreshTree = async (root: string) => {
     const [nodes, statuses] = await Promise.all([window.ide.getTree(root), window.ide.gitStatus(root)]);
@@ -1061,6 +1103,123 @@ export function App() {
   }, []);
 
   useEffect(() => {
+    if (sessionHydratedRef.current) {
+      return;
+    }
+    sessionHydratedRef.current = true;
+    const snapshot = loadSessionSnapshot();
+    if (!snapshot) {
+      return;
+    }
+
+    setSplitEnabled(snapshot.splitEnabled);
+    setLeftTab(snapshot.leftTab);
+    setPanelTab(snapshot.panelTab);
+    setBottomTab(snapshot.bottomTab);
+    setAutoSaveMode(snapshot.autoSaveMode);
+    setSearchText(snapshot.searchText);
+    setTerminalInput(snapshot.terminalInput);
+
+    const root = snapshot.workspaceRoot;
+    if (!root) {
+      return;
+    }
+
+    void (async () => {
+      try {
+        await window.ide.getTree(root);
+      } catch {
+        setLogs((prev) => [`[session] skipped stale workspace ${root}`, ...prev].slice(0, 200));
+        return;
+      }
+
+      setWorkspaceRoot(root);
+
+      const restoredTabs: Tab[] = [];
+      for (const savedTab of snapshot.tabs) {
+        try {
+          const file = await window.ide.readFile(root, savedTab.path);
+          if (file.content === null && !file.binary) {
+            continue;
+          }
+          if (file.binary) {
+            restoredTabs.push({
+              path: savedTab.path,
+              content: "",
+              originalContent: "",
+              dirty: false,
+              binary: true
+            });
+            continue;
+          }
+          const diskContent = file.content ?? "";
+          const content = savedTab.dirty ? savedTab.content : diskContent;
+          const originalContent = savedTab.dirty ? savedTab.originalContent || diskContent : diskContent;
+          restoredTabs.push({
+            path: savedTab.path,
+            content,
+            originalContent,
+            dirty: savedTab.dirty && content !== originalContent,
+            binary: false
+          });
+        } catch {
+          continue;
+        }
+      }
+
+      setTabs(restoredTabs);
+      const tabPathSet = new Set(restoredTabs.map((tab) => tab.path));
+      const restoredActive =
+        snapshot.activeTab && tabPathSet.has(snapshot.activeTab)
+          ? snapshot.activeTab
+          : (restoredTabs[0]?.path ?? null);
+      const restoredSecond =
+        snapshot.secondTab && tabPathSet.has(snapshot.secondTab)
+          ? snapshot.secondTab
+          : (restoredTabs[1]?.path ?? restoredTabs[0]?.path ?? null);
+      setActiveTab(restoredActive);
+      setSecondTab(restoredSecond);
+      setLogs((prev) => [`[session] restored ${restoredTabs.length} tabs`, ...prev].slice(0, 200));
+    })();
+  }, []);
+
+  useEffect(() => {
+    if (!sessionHydratedRef.current) {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      saveSessionSnapshot(
+        buildSessionSnapshot({
+          workspaceRoot,
+          tabs,
+          activeTab,
+          secondTab,
+          splitEnabled,
+          leftTab,
+          panelTab,
+          bottomTab,
+          autoSaveMode,
+          searchText,
+          terminalInput
+        })
+      );
+    }, 180);
+    return () => window.clearTimeout(timer);
+  }, [
+    workspaceRoot,
+    tabs,
+    activeTab,
+    secondTab,
+    splitEnabled,
+    leftTab,
+    panelTab,
+    bottomTab,
+    autoSaveMode,
+    searchText,
+    terminalInput
+  ]);
+
+  useEffect(() => {
     if (!workspaceRoot || autoSaveMode !== "afterDelay" || !active || !active.dirty || active.binary) {
       return;
     }
@@ -1132,6 +1291,10 @@ export function App() {
     if (!root) {
       return;
     }
+    setTabs([]);
+    setActiveTab(null);
+    setSecondTab(null);
+    setSearchHits([]);
     setWorkspaceRoot(root);
     setLogs((prev) => [`[workspace] opened ${root}`, ...prev]);
   };
@@ -2063,21 +2226,31 @@ export function App() {
   const breadcrumbs = activeTab ? activeTab.split("/") : [];
 
   if (typeof window.ide === "undefined") {
-    throw new AppErrorBoundary("preload api missing");
+    throw new Error("preload api missing");
   }
 
   return (
     <div className="app-shell" aria-label="Atlas Meridian">
+      <a className="skip-link" href="#main-content">Skip to main content</a>
+      <div className="sr-only" aria-live="polite" aria-atomic="true">{accessibilityStatus}</div>
       <header className="topbar">
         <div className="logo-wrap">
           <span className="logo-dot" />
           <strong>Atlas Meridian</strong>
         </div>
         <div className="header-actions">
-          <button onClick={openWorkspace}>Open Workspace</button>
-          <button onClick={() => setCommandPaletteOpen(true)}>Command Palette</button>
+          <button onClick={openWorkspace} aria-label="Open workspace folder">Open Workspace</button>
+          <button onClick={() => setCommandPaletteOpen(true)} aria-haspopup="dialog" aria-expanded={commandPaletteOpen}>
+            Command Palette
+          </button>
           <button onClick={() => setSplitEnabled((flag) => !flag)}>{splitEnabled ? "Single" : "Split"} Editor</button>
-          <select value={autoSaveMode} onChange={(event) => setAutoSaveMode(event.target.value as "manual" | "afterDelay" | "onBlur")}>
+          <label className="sr-only" htmlFor="autosave-mode">Auto-save mode</label>
+          <select
+            id="autosave-mode"
+            aria-label="Auto-save mode"
+            value={autoSaveMode}
+            onChange={(event) => setAutoSaveMode(event.target.value as "manual" | "afterDelay" | "onBlur")}
+          >
             <option value="manual">Save: Manual</option>
             <option value="afterDelay">Save: Delay</option>
             <option value="onBlur">Save: Blur</option>
@@ -2085,14 +2258,26 @@ export function App() {
         </div>
       </header>
 
-      <div className="main-grid" style={{
+      <div
+        id="main-content"
+        className="main-grid"
+        role="main"
+        aria-label="Atlas Meridian workspace"
+        style={{
         gridTemplateColumns: `${layout.leftWidth}px 6px minmax(420px, 1fr) 6px ${layout.rightWidth}px`,
         gridTemplateRows: `minmax(280px, 1fr) 6px ${layout.bottomHeight}px`
-      }}>
+        }}
+      >
         <aside className="pane pane-left">
-          <div className="tab-row">
+          <div className="tab-row" role="tablist" aria-label="Left panel tabs">
             {leftTabs.map((tab) => (
-              <button key={tab} className={leftTab === tab ? "active" : ""} onClick={() => setLeftTab(tab)}>
+              <button
+                key={tab}
+                role="tab"
+                aria-selected={leftTab === tab}
+                className={leftTab === tab ? "active" : ""}
+                onClick={() => setLeftTab(tab)}
+              >
                 {tab}
               </button>
             ))}
@@ -2130,9 +2315,15 @@ export function App() {
           <div className="breadcrumbs">
             {breadcrumbs.length ? breadcrumbs.join(" / ") : "No file selected"}
           </div>
-          <div className="tab-row tabs-files">
+          <div className="tab-row tabs-files" role="tablist" aria-label="Open file tabs">
             {tabs.map((tab) => (
-              <button key={tab.path} className={activeTab === tab.path ? "active" : ""} onClick={() => setActiveTab(tab.path)}>
+              <button
+                key={tab.path}
+                role="tab"
+                aria-selected={activeTab === tab.path}
+                className={activeTab === tab.path ? "active" : ""}
+                onClick={() => setActiveTab(tab.path)}
+              >
                 {tab.path}{tab.dirty ? " *" : ""}
               </button>
             ))}
@@ -2200,8 +2391,18 @@ export function App() {
             ) : null}
           </div>
           <div className="replace-row">
-            <input value={replaceNeedle} onChange={(event) => setReplaceNeedle(event.target.value)} placeholder="Find" />
-            <input value={replaceValue} onChange={(event) => setReplaceValue(event.target.value)} placeholder="Replace" />
+            <input
+              value={replaceNeedle}
+              onChange={(event) => setReplaceNeedle(event.target.value)}
+              placeholder="Find"
+              aria-label="Find text"
+            />
+            <input
+              value={replaceValue}
+              onChange={(event) => setReplaceValue(event.target.value)}
+              placeholder="Replace"
+              aria-label="Replacement text"
+            />
             <button onClick={runReplacePreview}>Preview</button>
             <button onClick={applyReplaceCurrent}>Replace Current</button>
             <button onClick={applyReplaceAllOpen}>Replace Open Tabs</button>
@@ -2218,9 +2419,15 @@ export function App() {
         <div className="splitter vertical" onMouseDown={() => { dragRef.current = "right"; }} role="separator" aria-label="Resize right panel" />
 
         <aside className="pane pane-right">
-          <div className="tab-row">
+          <div className="tab-row" role="tablist" aria-label="Right panel tabs">
             {panelTabs.map((tab) => (
-              <button key={tab} className={panelTab === tab ? "active" : ""} onClick={() => setPanelTab(tab)}>
+              <button
+                key={tab}
+                role="tab"
+                aria-selected={panelTab === tab}
+                className={panelTab === tab ? "active" : ""}
+                onClick={() => setPanelTab(tab)}
+              >
                 {tab}
               </button>
             ))}
@@ -3224,9 +3431,15 @@ export function App() {
         </aside>
 
         <section className="pane pane-bottom" style={{ gridColumn: "1 / -1" }}>
-          <div className="tab-row">
+          <div className="tab-row" role="tablist" aria-label="Bottom panel tabs">
             {bottomTabs.map((tab) => (
-              <button key={tab} className={bottomTab === tab ? "active" : ""} onClick={() => setBottomTab(tab)}>
+              <button
+                key={tab}
+                role="tab"
+                aria-selected={bottomTab === tab}
+                className={bottomTab === tab ? "active" : ""}
+                onClick={() => setBottomTab(tab)}
+              >
                 {tab}
               </button>
             ))}
@@ -3234,7 +3447,12 @@ export function App() {
           {bottomTab === "terminal" ? (
             <div className="terminal-pane">
               <div className="inline-search">
-                <input value={terminalInput} onChange={(event) => setTerminalInput(event.target.value)} placeholder="Run command" />
+                <input
+                  value={terminalInput}
+                  onChange={(event) => setTerminalInput(event.target.value)}
+                  placeholder="Run command"
+                  aria-label="Terminal command"
+                />
                 <button onClick={runCommand}>Run</button>
                 <button onClick={() => { void startPtySession(); }}>Start PTY Session</button>
                 <button onClick={() => { void stopPtySession(); }} disabled={!terminalSessionId || terminalSessionStatus !== "running"}>
@@ -3251,6 +3469,7 @@ export function App() {
                     value={terminalSessionInput}
                     onChange={(event) => setTerminalSessionInput(event.target.value)}
                     placeholder="Send stdin to PTY"
+                    aria-label="PTY stdin input"
                   />
                   <button onClick={() => { void sendPtyInput(); }} disabled={!terminalSessionId || terminalSessionStatus !== "running"}>
                     Send
@@ -3263,21 +3482,25 @@ export function App() {
                   value={pipelineLintCommand}
                   onChange={(event) => setPipelineLintCommand(event.target.value)}
                   placeholder="Lint command"
+                  aria-label="Lint command"
                 />
                 <input
                   value={pipelineTypecheckCommand}
                   onChange={(event) => setPipelineTypecheckCommand(event.target.value)}
                   placeholder="Typecheck command"
+                  aria-label="Typecheck command"
                 />
                 <input
                   value={pipelineTestCommand}
                   onChange={(event) => setPipelineTestCommand(event.target.value)}
                   placeholder="Test command"
+                  aria-label="Test command"
                 />
                 <input
                   value={pipelineBuildCommand}
                   onChange={(event) => setPipelineBuildCommand(event.target.value)}
                   placeholder="Build command"
+                  aria-label="Build command"
                 />
                 {pipelineResult ? (
                   <code>
@@ -3317,7 +3540,7 @@ export function App() {
       </div>
 
       {commandPaletteOpen ? (
-        <div className="command-palette" role="dialog" aria-label="Command palette">
+        <div className="command-palette" role="dialog" aria-modal="true" aria-label="Command palette">
           <div className="palette-card">
             <h3>Command Palette</h3>
             {["Open Workspace", "Toggle Split Editor", "Run Tests", "Focus Agent", "Export Audit"].map((command) => (

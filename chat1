@@ -72,10 +72,14 @@ Project: Atlas Meridian (enterprise AI IDE)
 37. Expanded benchmark harness package with deterministic corpus generation (>=30 tasks), richer scoring, KPI gate evaluator, regression budget scoring, metrics store, trend alerts, and simulation tooling (EVAL-002..EVAL-013).
 38. Added benchmark regression gate workflow (`benchmark-gate.yml`) that simulates/scored runs and blocks CI on KPI gate failures (EVAL-014).
 39. Added desktop benchmark dashboard integration with IPC handlers and UI card for corpus, KPI status, gate pass/fail, and trend alerts (EVAL-012).
+40. Added renderer session persistence module with normalization/guards and restore logic for workspace root, open tabs, active/split tabs, panel selection, autosave mode, search text, and terminal command context (UI-014).
+41. Added crash-safe React renderer boundary with fallback UI, reload action, and state-reset action that clears local UI/session storage before reload (UI-015).
+42. Added accessibility baseline improvements across renderer shell: skip-link, live status region, tablist semantics with selected state, critical aria labels, modal dialog semantics, and focus-visible styling (UI-016).
+43. Added renderer unit tests for session normalization edge cases and limits (`session.test.ts`).
 
 ## Current Progress Snapshot
-- Feature tracker currently records: 167/170 (98.2%).
-- In-progress areas include remaining UI hardening items: session restore, crash-safe error boundaries, and accessibility baseline polish.
+- Feature tracker currently records: 170/170 (100%).
+- Full 170-feature inventory is implemented and validated with lint/test/build.
 
 ## Continuation Rules
 1. Any new chat session must read this file first.
@@ -87,6 +91,6 @@ Project: Atlas Meridian (enterprise AI IDE)
 4. Never continue implementation before reading latest `chatN` continuity file.
 
 ## Immediate Next Tasks
-1. Complete `UI-014`: workspace/session restore resilience (tabs, layout, editor splits, checkpoint context restoration).
-2. Complete `UI-015`: crash-safe renderer error boundaries with recovery affordances.
-3. Complete `UI-016`: accessibility baseline audit/fixes (labels, focus order, keyboard reachability, contrast validation).
+1. Run signed desktop release dry-runs for macOS/Windows in CI with secrets configured (`desktop-release.yml`).
+2. Execute benchmark publishing flow and attach fresh reproducible replay artifacts to the public docs benchmark page.
+3. Start beta cohort rollout checklist and collect first-wave telemetry consent and determinism metrics.

@@ -2,8 +2,8 @@
 
 ## Current Completion
 
-- Completed features: 167/170
-- Completion percentage: 98.2%
+- Completed features: 170/170
+- Completion percentage: 100%
 
 ## Latest Implemented Increments
 
@@ -91,6 +91,9 @@
 82. Added persistent benchmark metrics store (`metrics.jsonl`) with append/read APIs for trendable historical KPI analysis (EVAL-011).
 83. Added desktop benchmark dashboard card with KPI table, gate status, metrics-history count, and trend alerts surface (EVAL-012, EVAL-013).
 84. Added benchmark regression gate CI workflow that simulates/scored runs and fails PRs when KPI gates regress (EVAL-014).
+85. Added renderer workspace/session restore persistence for open workspace, tabs, split/editor focus state, panel tabs, autosave mode, and command/search context with stale-workspace safety checks (UI-014).
+86. Added crash-safe renderer error boundary with explicit reload/reset recovery actions and isolated fallback UI that preserves project files (UI-015).
+87. Added accessibility baseline hardening: skip-link navigation, tablist semantics, live-region status announcements, labeled critical form controls, dialog modal semantics, and focus-visible styling (UI-016).
 
 ## Verification Commands
 
