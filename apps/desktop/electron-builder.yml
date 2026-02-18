@@ -14,7 +14,7 @@ artifactName: "${productName}-${version}-${os}-${arch}.${ext}"
 publish:
   - provider: generic
     url: "${env.ATLAS_UPDATE_BASE_URL}"
-    channel: "${env.ATLAS_UPDATE_CHANNEL:-stable}"
+    channel: "${env.ATLAS_UPDATE_CHANNEL}"
 mac:
   category: public.app-category.developer-tools
   target:
@@ -33,6 +33,7 @@ mac:
   notarize: false
 win:
   publisherName: Atlas Meridian
+  icon: build/icon.ico
   target:
     - target: nsis
       arch:

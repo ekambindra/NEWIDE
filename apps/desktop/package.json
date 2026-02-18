@@ -1,6 +1,8 @@
 {
   "name": "@ide/desktop",
   "version": "0.1.0",
+  "description": "Atlas Meridian desktop AI IDE",
+  "author": "Atlas Meridian",
   "private": true,
   "type": "module",
   "main": "dist/main/main.js",
