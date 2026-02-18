@@ -29,3 +29,5 @@ This repository stores the full implementation plan, prompts, contracts, milesto
 ## Repository Metadata
 
 - [Repository Info and Links](./REPOSITORY_INFO.md)
+- [Chat Continuity Protocol](../CHAT_CONTINUITY.md)
+- [Continuity Log (chat1)](../chat1)

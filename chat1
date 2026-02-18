@@ -1,0 +1,55 @@
+# chat1 - Atlas Meridian Continuity Log
+
+Last updated: 2026-02-18
+Project: Atlas Meridian (enterprise AI IDE)
+
+## Locked Decisions
+1. Templates first: Node microservices + Postgres.
+2. Backend: Node.js + TypeScript.
+3. MVP platforms: macOS + Windows GA.
+4. Product model: Open-core.
+5. Deployment: AWS managed cloud control plane + local/offline support.
+6. Policy default: Balanced.
+7. License: Apache-2.0 (core).
+8. Telemetry: opt-in by default.
+
+## Major Completed Work So Far
+1. Core desktop Electron shell with Kiro-style pane layout.
+2. Workspace tree/search, editor tabs, terminal, test/log views.
+3. Diff approval with chunk-level accept/reject and patch queue.
+4. Diff checkpoints, checkpoint revert, signed patch manifest verification.
+5. Deterministic runtime checkpoint artifacts and replay-oriented files.
+6. Controlled terminal execution with policy gates and structured test parsing.
+7. Pipeline runner (lint/typecheck/test/build) with checkpoint artifacts.
+8. Multi-agent concurrent runtime orchestration and coordinator summaries.
+9. Immutable local audit event chain and export.
+10. Team layer: memory KB, ADR logs, reviewer mode, ownership mapping/conflicts.
+11. Changelog/release-note draft generation.
+12. Indexer improvements: parser pipeline fallback diagnostics panel, repo map, context builder.
+13. Autonomy quality checks: artifact completeness and green pipeline guarantee.
+14. Product rename completed to Atlas Meridian across app/docs/package metadata.
+
+## Additional Update In This Session
+1. Added grounding-evidence generation for diff applies (IDX-011 path):
+   - indexer helper `buildGroundingEvidence(...)` computes line-level grounded evidence.
+   - diff checkpoint flow now stores grounding evidence artifact and evidence count.
+   - UI now displays grounding evidence count per diff checkpoint.
+2. Added chat continuity protocol files so new sessions can continue with full context.
+
+## Current Progress Snapshot
+- Feature tracker currently records: 119/170 (70.0%).
+- In-progress areas include advanced indexing, autonomy builder extensions, enterprise SSO/RBAC/security layers, release hardening, and full benchmark KPIs.
+
+## Continuation Rules
+1. Any new chat session must read this file first.
+2. If context fills again, create `chat2`, then `chat3`, etc.
+3. Each new chat file must include:
+   - What was completed in that session,
+   - Updated completion counts and percent,
+   - Next concrete implementation tasks.
+4. Never continue implementation before reading latest `chatN` continuity file.
+
+## Immediate Next Tasks
+1. Continue next in-progress features: IDX-007/IDX-009/IDX-012/IDX-014 and AUTO-017/AUTO-018.
+2. Continue enterprise/public release pipeline milestones.
+3. Keep extending benchmark/KPI gates and regression-blocking CI behavior.

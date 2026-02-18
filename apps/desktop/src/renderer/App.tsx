@@ -212,6 +212,8 @@ type DiffCheckpointRecord = {
   keyId: string;
   manifestPath: string;
   signature: string;
+  groundingEvidenceCount?: number;
+  groundingPath?: string | null;
   signatureValid?: boolean;
 };
 
@@ -2014,6 +2016,7 @@ export function App() {
                         <code>signature: {record.signatureValid === true ? "valid" : "invalid/unverified"}</code>
                         <code>key: {record.keyId || "n/a"}</code>
                         <code>chunks: {record.appliedChunks.join(", ") || "none"}</code>
+                        <code>grounding evidence: {record.groundingEvidenceCount ?? 0}</code>
                         <div className="inline-search">
                           <button onClick={() => { void verifyDiffCheckpointSignature(record.id); }}>
                             Verify Signature

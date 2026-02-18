@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { mkdtemp, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { SymbolIndexer, buildContext } from "./index.js";
+import { SymbolIndexer, buildContext, buildGroundingEvidence } from "./index.js";
 
 describe("indexer", () => {
   it("indexes symbols incrementally", async () => {
@@ -23,5 +23,34 @@ describe("indexer", () => {
 
     const context = buildContext(first, 1000);
     expect(context.files.length).toBe(1);
+  });
+
+  it("builds grounding evidence for changed lines", () => {
+    const symbols = [
+      {
+        symbol_id: "a.ts:1:function:demo",
+        file: "a.ts",
+        kind: "function",
+        name: "demo",
+        range: { start: 1, end: 1 },
+        signature: "export function demo() {}",
+        references: []
+      }
+    ];
+
+    const evidence = buildGroundingEvidence({
+      editId: "edit-1",
+      file: "a.ts",
+      baseContent: "export function demo() {}\nconst value = 1;\n",
+      nextContent: "export function demo() {}\nconst value = 2;\n",
+      symbols
+    });
+
+    expect(evidence.length).toBe(1);
+    expect(evidence[0]?.edit_id).toBe("edit-1");
+    expect(evidence[0]?.file).toBe("a.ts");
+    expect(evidence[0]?.line).toBe(2);
+    expect(evidence[0]?.evidence_type).toBe("search");
+    expect(evidence[0]?.excerpt_hash.length).toBe(40);
   });
 });

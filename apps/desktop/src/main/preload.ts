@@ -113,6 +113,8 @@ type DiffCheckpointRecord = {
   keyId: string;
   manifestPath: string;
   signature: string;
+  groundingEvidenceCount?: number;
+  groundingPath?: string | null;
   signatureValid?: boolean;
 };
 

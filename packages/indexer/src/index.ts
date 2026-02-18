@@ -4,7 +4,7 @@ import { readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { extname, relative } from "node:path";
 import ts from "typescript";
-import type { IndexSymbol } from "@ide/shared";
+import type { GroundingEvidence, IndexSymbol } from "@ide/shared";
 
 export type SearchMatch = {
   file: string;
@@ -71,6 +71,14 @@ function nowIso(): string {
 
 function safeNumber(value: unknown, fallback = 0): number {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+function normalizeLf(text: string): string {
+  return text.replace(/\r\n/g, "\n");
+}
+
+function normalizeRepoPath(path: string): string {
+  return path.replaceAll("\\", "/");
 }
 
 export class LexicalSearch {
@@ -531,4 +539,44 @@ export function buildContext(symbols: IndexSymbol[], tokenBudget: number): Conte
     symbols: selected,
     budgetUsed: budget
   };
+}
+
+function changedLineNumbers(baseContent: string, nextContent: string): number[] {
+  const before = normalizeLf(baseContent).split("\n");
+  const after = normalizeLf(nextContent).split("\n");
+  const max = Math.max(before.length, after.length);
+  const changed: number[] = [];
+  for (let idx = 0; idx < max; idx += 1) {
+    if ((before[idx] ?? "") !== (after[idx] ?? "")) {
+      changed.push(idx + 1);
+    }
+  }
+  return changed;
+}
+
+export function buildGroundingEvidence(input: {
+  editId: string;
+  file: string;
+  baseContent: string;
+  nextContent: string;
+  symbols: IndexSymbol[];
+  maxEntries?: number;
+}): GroundingEvidence[] {
+  const file = normalizeRepoPath(input.file);
+  const targetSymbols = input.symbols.filter((symbol) => normalizeRepoPath(symbol.file) === file);
+  const nextLines = normalizeLf(input.nextContent).split("\n");
+  const changed = changedLineNumbers(input.baseContent, input.nextContent);
+  const limit = Math.max(1, input.maxEntries ?? 200);
+
+  return changed.slice(0, limit).map((line) => {
+    const symbolHit = targetSymbols.find((symbol) => symbol.range.start <= line && symbol.range.end >= line);
+    const excerpt = nextLines[line - 1] ?? "";
+    return {
+      edit_id: input.editId,
+      file,
+      line,
+      evidence_type: symbolHit ? "symbol" : "search",
+      excerpt_hash: createHash("sha1").update(`${file}:${line}:${excerpt}`).digest("hex")
+    };
+  });
 }

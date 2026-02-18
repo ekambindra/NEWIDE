@@ -14,6 +14,7 @@ import ignore from "ignore";
 import { AgentRuntime } from "@ide/agent-runtime";
 import {
   SymbolIndexer,
+  buildGroundingEvidence,
   type IndexerDiagnostics,
   type RepoMapEntry
 } from "@ide/indexer";
@@ -153,6 +154,8 @@ type DiffCheckpointRecord = {
   keyId: string;
   manifestPath: string;
   signature: string;
+  groundingEvidenceCount?: number;
+  groundingPath?: string | null;
   signatureValid?: boolean;
 };
 
@@ -334,6 +337,10 @@ async function getPatchSigningSecret(): Promise<string> {
 
 function patchManifestPath(checkpointId: string): string {
   return join(diffCheckpointRoot(), `${checkpointId}.manifest.json`);
+}
+
+function diffGroundingPath(checkpointId: string): string {
+  return join(diffCheckpointRoot(), `${checkpointId}.grounding.json`);
 }
 
 function canonicalManifestPayload(manifest: Omit<DiffPatchManifest, "payloadHash" | "keyId" | "signature">): string {
@@ -1690,7 +1697,8 @@ async function listDiffCheckpoints(limit: number): Promise<DiffCheckpointRecord[
     if (
       !entry.isFile() ||
       !entry.name.endsWith(".json") ||
-      entry.name.endsWith(".manifest.json")
+      entry.name.endsWith(".manifest.json") ||
+      entry.name.endsWith(".grounding.json")
     ) {
       continue;
     }
@@ -1748,19 +1756,58 @@ async function applyDiffQueue(input: {
     };
   }
 
-  await safeWrite(input.root, input.path, input.nextContent);
+  const next = normalizeLf(input.nextContent);
+  await safeWrite(input.root, input.path, next);
+  const checkpointId = `diff-${Date.now()}-${randomUUID().slice(0, 8)}`;
+  const normalizedPath = normalizeRepoPath(input.path);
+
+  let groundingEvidenceCount = 0;
+  let groundingPath: string | null = null;
+  try {
+    const symbols = await workspaceIndexer.indexFile(input.root, resolve(input.root, input.path));
+    const grounding = buildGroundingEvidence({
+      editId: checkpointId,
+      file: normalizedPath,
+      baseContent: base,
+      nextContent: next,
+      symbols
+    });
+    await fs.mkdir(diffCheckpointRoot(), { recursive: true });
+    groundingPath = diffGroundingPath(checkpointId);
+    await fs.writeFile(
+      groundingPath,
+      `${JSON.stringify(
+        {
+          checkpointId,
+          generatedAt: nowIso(),
+          file: normalizedPath,
+          evidence: grounding
+        },
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+    groundingEvidenceCount = grounding.length;
+  } catch {
+    groundingEvidenceCount = 0;
+    groundingPath = null;
+  }
+
   const recordBase: DiffCheckpointRecord = {
-    id: `diff-${Date.now()}-${randomUUID().slice(0, 8)}`,
+    id: checkpointId,
     createdAt: nowIso(),
     root: input.root,
     path: input.path,
     baseHash: hashText(base),
     beforeContent: input.baseContent,
-    afterContent: input.nextContent,
+    afterContent: next,
     appliedChunks: input.appliedChunks,
     keyId: "",
     manifestPath: "",
     signature: "",
+    groundingEvidenceCount,
+    groundingPath,
     signatureValid: true
   };
   const manifest = await writeSignedPatchManifest(recordBase);
@@ -2358,6 +2405,8 @@ app.whenReady().then(async () => {
         appliedChunks: payload.appliedChunks ?? [],
         allowFullRewrite: payload.allowFullRewrite === true
       });
+      const checkpoint =
+        result.checkpointId ? await readDiffCheckpoint(result.checkpointId) : null;
       await appendAuditEvent({
         action: "diff.apply_queue",
         target: payload.path,
@@ -2374,7 +2423,8 @@ app.whenReady().then(async () => {
           root: payload.root,
           checkpoint_id: result.checkpointId,
           chunk_count: payload.appliedChunks?.length ?? 0,
-          allow_full_rewrite: payload.allowFullRewrite === true
+          allow_full_rewrite: payload.allowFullRewrite === true,
+          grounding_evidence_count: checkpoint?.groundingEvidenceCount ?? null
         }
       });
       return result;

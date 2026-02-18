@@ -2,8 +2,8 @@
 
 ## Current Completion
 
-- Completed features: 118/170
-- Completion percentage: 69.4%
+- Completed features: 119/170
+- Completion percentage: 70.0%
 
 ## Latest Implemented Increments
 
@@ -42,6 +42,8 @@
 33. Index diagnostics panel and workspace scan workflow with freshness/latency/error visibility (IDX-015).
 34. Artifact completeness checker for required production artifacts (`README`, `ARCHITECTURE`, `RUNBOOK`, `SECURITY`, `.env.example`, `docker-compose`, workflows) (AUTO-015).
 35. Green pipeline guarantee checker with pass-rate KPI computation and target evaluation (AUTO-016).
+36. Grounding evidence generation for diff edits with per-line hashed evidence artifacts and checkpoint/UI surfacing (IDX-011).
+37. Session continuity protocol and rolling `chatN` handoff files to preserve implementation state across context windows.
 
 ## Verification Commands
 

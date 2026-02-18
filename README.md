@@ -33,6 +33,7 @@ npm run dev:desktop
 - Decision-complete plan: `docs/plan/DECISION_COMPLETE_PLAN.md`
 - Master prompt: `docs/prompts/MASTER_EXECUTION_PROMPT.md`
 - Feature status: `docs/FEATURE_STATUS.md`
+- Chat continuity protocol: `CHAT_CONTINUITY.md` and `chat1`
 
 ## Milestone Status
 
