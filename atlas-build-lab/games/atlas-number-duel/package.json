@@ -1,0 +1,11 @@
+{
+  "name": "atlas-number-duel",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node src/game.js",
+    "test": "node --test",
+    "build": "node -e \"console.log('No build step required for atlas-number-duel')\""
+  }
+}

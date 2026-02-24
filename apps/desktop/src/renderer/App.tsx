@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { defaultLayout, loadLayout, saveLayout, type LayoutState } from "./layout";
 import {
   loadSessionSnapshot,
@@ -27,6 +27,31 @@ type SearchHit = {
   file: string;
   line: number;
   text: string;
+};
+
+type WorkflowSuggestion = {
+  value: string;
+  label: string;
+  description: string;
+};
+
+type AgentActivityItem = {
+  id: string;
+  ts: string;
+  stage: string;
+  detail: string;
+};
+
+type ThreadNavItem = {
+  id: string;
+  title: string;
+  subtitle: string;
+  turnCount: number;
+};
+
+type MultiAgentRunOutcome = {
+  status: "success" | "cancelled" | "error";
+  error?: string;
 };
 
 type PanelTab = "agent" | "plan" | "diff" | "checkpoints";
@@ -563,6 +588,25 @@ type MultiFileRefactorResult = {
 const panelTabs: PanelTab[] = ["agent", "plan", "diff", "checkpoints"];
 const bottomTabs: BottomTab[] = ["terminal", "tests", "logs"];
 const leftTabs: LeftTab[] = ["files", "search"];
+const quickWorkflowChips: Array<{ label: string; command: string }> = [
+  { label: "Open", command: "/open" },
+  { label: "Run Tests", command: "/run npm run test" },
+  { label: "Pipeline", command: "/pipeline" },
+  { label: "Build Stack", command: "/build Atlas Website Stack" },
+  { label: "Diff", command: "/diff" },
+  { label: "Checkpoints", command: "/checkpoints" }
+];
+const slashHelpEntries: Array<{ command: string; description: string }> = [
+  { command: "/help", description: "Show available commands" },
+  { command: "/open", description: "Open workspace folder" },
+  { command: "/search <query>", description: "Search project text" },
+  { command: "/run <command>", description: "Execute terminal command" },
+  { command: "/pipeline", description: "Run lint/typecheck/test/build" },
+  { command: "/build <name>", description: "Generate backend template" },
+  { command: "/refactor <from> <to>", description: "Preview refactor rename" },
+  { command: "/diff", description: "Open diff review panel" },
+  { command: "/checkpoints", description: "Open checkpoint timeline" }
+];
 
 function usePersistentLayout(): [LayoutState, (next: LayoutState) => void] {
   const [layout, setLayout] = useState<LayoutState>(() => {
@@ -602,6 +646,23 @@ function renderTree(nodes: TreeNode[], onOpen: (path: string) => void) {
       ))}
     </ul>
   );
+}
+
+function flattenTreeFilePaths(nodes: TreeNode[]): string[] {
+  const files: string[] = [];
+  const walk = (items: TreeNode[]) => {
+    items.forEach((item) => {
+      if (item.type === "file") {
+        files.push(item.path);
+        return;
+      }
+      if (item.children && item.children.length > 0) {
+        walk(item.children);
+      }
+    });
+  };
+  walk(nodes);
+  return files;
 }
 
 function computeDiffChunks(
@@ -757,6 +818,8 @@ function buildSessionSnapshot(input: {
   autoSaveMode: "manual" | "afterDelay" | "onBlur";
   searchText: string;
   terminalInput: string;
+  workflowHistory: string[];
+  quickChipFavorites: string[];
 }): SessionSnapshot {
   return {
     version: 1,
@@ -771,7 +834,9 @@ function buildSessionSnapshot(input: {
     bottomTab: input.bottomTab,
     autoSaveMode: input.autoSaveMode,
     searchText: input.searchText,
-    terminalInput: input.terminalInput
+    terminalInput: input.terminalInput,
+    workflowHistory: input.workflowHistory,
+    quickChipFavorites: input.quickChipFavorites
   };
 }
 
@@ -857,6 +922,22 @@ export function App() {
       focus: string;
     }>;
   } | null>(null);
+  const [multiAgentRunning, setMultiAgentRunning] = useState(false);
+  const [freeformRunId, setFreeformRunId] = useState<string | null>(null);
+  const [freeformRunStatus, setFreeformRunStatus] = useState<"idle" | "running" | "cancelling">("idle");
+  const [workflowInput, setWorkflowInput] = useState("");
+  const [workflowFocused, setWorkflowFocused] = useState(false);
+  const [workflowHistory, setWorkflowHistory] = useState<string[]>([]);
+  const [workflowHistoryIndex, setWorkflowHistoryIndex] = useState(-1);
+  const [workflowHistoryDraft, setWorkflowHistoryDraft] = useState("");
+  const [workflowSuggestionIndex, setWorkflowSuggestionIndex] = useState(0);
+  const [quickChipFavorites, setQuickChipFavorites] = useState<string[]>([]);
+  const [agentActivityFeed, setAgentActivityFeed] = useState<AgentActivityItem[]>([]);
+  const [uiShellMode, setUiShellMode] = useState<"codex" | "legacy">("codex");
+  const [selectedThreadId, setSelectedThreadId] = useState<string | null>(null);
+  const [changeFilterText, setChangeFilterText] = useState("");
+  const [explorerFilterText, setExplorerFilterText] = useState("");
+  const [advancedControls, setAdvancedControls] = useState(false);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [replaceNeedle, setReplaceNeedle] = useState("");
   const [replaceValue, setReplaceValue] = useState("");
@@ -929,6 +1010,9 @@ export function App() {
   const [ideReady, setIdeReady] = useState(
     () => typeof window !== "undefined" && typeof window.ide !== "undefined"
   );
+  const workflowInputRef = useRef<HTMLInputElement | null>(null);
+  const workflowBlurTimerRef = useRef<number | null>(null);
+  const canceledFreeformRunsRef = useRef<Set<string>>(new Set());
   const dragRef = useRef<null | "left" | "right" | "bottom">(null);
   const sessionHydratedRef = useRef(false);
 
@@ -947,6 +1031,228 @@ export function App() {
     [active]
   );
   const accessibilityStatus = useMemo(() => logs[0] ?? "Atlas Meridian ready", [logs]);
+  const orderedQuickChips = useMemo(() => {
+    const byCommand = new Map(quickWorkflowChips.map((chip) => [chip.command, chip]));
+    const favorites = quickChipFavorites
+      .map((command) => byCommand.get(command))
+      .filter((chip): chip is { label: string; command: string } => Boolean(chip));
+    const remainder = quickWorkflowChips.filter((chip) => !quickChipFavorites.includes(chip.command));
+    return [...favorites, ...remainder];
+  }, [quickChipFavorites]);
+  const runState = useMemo<"idle" | "running" | "blocked">(() => {
+    if (pendingApprovalCommand) {
+      return "blocked";
+    }
+    if (freeformRunStatus === "cancelling") {
+      return "running";
+    }
+    if (
+      multiAgentRunning ||
+      builderRunning ||
+      refactorRunning ||
+      benchmarkRunning ||
+      terminalSessionStatus === "running"
+    ) {
+      return "running";
+    }
+    return "idle";
+  }, [
+    pendingApprovalCommand,
+    freeformRunStatus,
+    multiAgentRunning,
+    builderRunning,
+    refactorRunning,
+    benchmarkRunning,
+    terminalSessionStatus
+  ]);
+  const runStateDetail = useMemo(() => {
+    if (pendingApprovalCommand) {
+      return "awaiting approval";
+    }
+    if (freeformRunStatus === "cancelling") {
+      return "cancelling freeform run";
+    }
+    if (freeformRunStatus === "running") {
+      return "freeform task running";
+    }
+    if (multiAgentRunning) {
+      return "multi-agent task";
+    }
+    if (builderRunning) {
+      return "project builder";
+    }
+    if (refactorRunning) {
+      return "refactor task";
+    }
+    if (benchmarkRunning) {
+      return "benchmark run";
+    }
+    if (terminalSessionStatus === "running") {
+      return "terminal session";
+    }
+    return "ready";
+  }, [
+    pendingApprovalCommand,
+    freeformRunStatus,
+    multiAgentRunning,
+    builderRunning,
+    refactorRunning,
+    benchmarkRunning,
+    terminalSessionStatus
+  ]);
+  const workflowSuggestions = useMemo(() => {
+    const catalog: WorkflowSuggestion[] = [
+      { value: "/help", label: "Help", description: "List supported workflow commands" },
+      { value: "/open", label: "Open Workspace", description: "Select a project folder" },
+      { value: "/files", label: "Show Files", description: "Open left file tree panel" },
+      { value: "/search ", label: "Search Project", description: "Search code across workspace" },
+      { value: "/run npm run test", label: "Run Tests", description: "Execute project tests in terminal" },
+      { value: "/pipeline", label: "Run Pipeline", description: "Run lint, typecheck, test, and build" },
+      { value: "/build Atlas Website Stack", label: "Build Backend Template", description: "Generate Node microservices + Postgres stack" },
+      { value: "/refactor runTask executeTask", label: "Refactor Symbol", description: "Preview a cross-file rename operation" },
+      { value: "/agent", label: "Open Agent Panel", description: "Show agent orchestration panel" },
+      { value: "/diff", label: "Open Diff Panel", description: "Review patch queue and chunk decisions" },
+      { value: "/checkpoints", label: "Open Checkpoints", description: "Inspect and replay checkpoint artifacts" },
+      { value: "run tests", label: "Natural: Run Tests", description: "Plain-language command routing" },
+      { value: "build website", label: "Natural: Build Website", description: "Generate website backend starter stack" }
+    ];
+
+    const query = workflowInput.trim().toLowerCase();
+    const filtered = query
+      ? catalog.filter((item) => {
+          const haystack = `${item.value} ${item.label} ${item.description}`.toLowerCase();
+          return haystack.includes(query);
+        })
+      : catalog;
+
+    const dynamic: WorkflowSuggestion[] = [];
+    if (query && !query.startsWith("/")) {
+      dynamic.push({
+        value: `search ${workflowInput.trim()}`,
+        label: "Search For Query",
+        description: "Search workspace for this text"
+      });
+      dynamic.push({
+        value: `run ${workflowInput.trim()}`,
+        label: "Run As Command",
+        description: "Execute prompt as terminal command"
+      });
+    }
+    if (!workspaceRoot) {
+      dynamic.push({
+        value: "/open",
+        label: "Open Workspace First",
+        description: "Select a workspace before running project commands"
+      });
+    }
+
+    const deduped = new Map<string, WorkflowSuggestion>();
+    [...dynamic, ...filtered].forEach((item) => {
+      if (!deduped.has(item.value)) {
+        deduped.set(item.value, item);
+      }
+    });
+
+    return Array.from(deduped.values()).slice(0, 8);
+  }, [workflowInput, workspaceRoot]);
+  const showWorkflowSuggestions = workflowFocused && workflowSuggestions.length > 0;
+  const threadNavItems = useMemo<ThreadNavItem[]>(() => {
+    const items = workflowHistory
+      .slice(-24)
+      .reverse()
+      .map((entry, index) => {
+        const compact = entry.replace(/\s+/g, " ").trim();
+        const title = compact.length > 46 ? `${compact.slice(0, 46)}...` : compact;
+        return {
+          id: `thread-${index}-${title.toLowerCase()}`,
+          title: title || "Untitled thread",
+          subtitle: index === 0 ? "latest" : `${index + 1} turns ago`,
+          turnCount: workflowHistory.length - index
+        };
+      });
+
+    if (items.length > 0) {
+      return items;
+    }
+    return [
+      {
+        id: "thread-empty",
+        title: "New thread",
+        subtitle: workspaceRoot
+          ? workspaceRoot.split(/[/\\]/).filter(Boolean).pop() ?? workspaceRoot
+          : "No workspace opened",
+        turnCount: 0
+      }
+    ];
+  }, [workflowHistory, workspaceRoot]);
+  const selectedThread = useMemo(
+    () => threadNavItems.find((item) => item.id === selectedThreadId) ?? threadNavItems[0] ?? null,
+    [threadNavItems, selectedThreadId]
+  );
+  const timelineLines = useMemo(() => logs.slice(0, 40), [logs]);
+  const changeCards = useMemo(() => {
+    const map = new Map<string, { file: string; touches: number; additions: number; deletions: number }>();
+    patchQueue.forEach((item) => {
+      const current = map.get(item.file) ?? {
+        file: item.file,
+        touches: 0,
+        additions: 0,
+        deletions: 0
+      };
+      current.touches += 1;
+      if (item.decision === "accepted") {
+        current.additions += 1;
+      } else if (item.decision === "rejected") {
+        current.deletions += 1;
+      }
+      map.set(item.file, current);
+    });
+    tabs
+      .filter((tab) => tab.dirty)
+      .forEach((tab) => {
+        const current = map.get(tab.path) ?? {
+          file: tab.path,
+          touches: 0,
+          additions: 0,
+          deletions: 0
+        };
+        current.touches += 1;
+        map.set(tab.path, current);
+      });
+    if (active && diffChunks.length > 0) {
+      map.set(active.path, {
+        file: active.path,
+        touches: diffChurn.changedChunks,
+        additions: Math.max(diffChurn.additions, map.get(active.path)?.additions ?? 0),
+        deletions: Math.max(diffChurn.deletions, map.get(active.path)?.deletions ?? 0)
+      });
+    }
+    return [...map.values()];
+  }, [patchQueue, tabs, active, diffChunks.length, diffChurn]);
+  const filteredChangeCards = useMemo(() => {
+    const filter = changeFilterText.trim().toLowerCase();
+    if (!filter) {
+      return changeCards;
+    }
+    return changeCards.filter((item) => item.file.toLowerCase().includes(filter));
+  }, [changeCards, changeFilterText]);
+  const explorerFiles = useMemo(() => flattenTreeFilePaths(tree), [tree]);
+  const filteredExplorerFiles = useMemo(() => {
+    const filter = explorerFilterText.trim().toLowerCase();
+    if (!filter) {
+      return explorerFiles;
+    }
+    return explorerFiles.filter((file) => file.toLowerCase().includes(filter));
+  }, [explorerFiles, explorerFilterText]);
+
+  useEffect(() => {
+    if (threadNavItems.length === 0) {
+      return;
+    }
+    if (!selectedThreadId || !threadNavItems.some((item) => item.id === selectedThreadId)) {
+      setSelectedThreadId(threadNavItems[0]?.id ?? null);
+    }
+  }, [threadNavItems, selectedThreadId]);
 
   const toggleLeftFeature = (tab: LeftTab) => {
     if (showLeftPane && leftTab === tab) {
@@ -1114,6 +1420,18 @@ export function App() {
   }, [activeTab, tabs, workspaceRoot]);
 
   useEffect(() => {
+    setWorkflowSuggestionIndex(0);
+  }, [workflowInput, workflowSuggestions.length]);
+
+  useEffect(() => {
+    return () => {
+      if (workflowBlurTimerRef.current !== null) {
+        window.clearTimeout(workflowBlurTimerRef.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
     const onBeforeUnload = (event: BeforeUnloadEvent) => {
       if (tabs.some((tab) => tab.dirty)) {
         event.preventDefault();
@@ -1189,6 +1507,8 @@ export function App() {
     setAutoSaveMode(snapshot.autoSaveMode);
     setSearchText(snapshot.searchText);
     setTerminalInput(snapshot.terminalInput);
+    setWorkflowHistory(snapshot.workflowHistory);
+    setQuickChipFavorites(snapshot.quickChipFavorites);
 
     const root = snapshot.workspaceRoot;
     if (!root) {
@@ -1270,7 +1590,9 @@ export function App() {
           bottomTab,
           autoSaveMode,
           searchText,
-          terminalInput
+          terminalInput,
+          workflowHistory,
+          quickChipFavorites
         })
       );
     }, 180);
@@ -1286,7 +1608,9 @@ export function App() {
     bottomTab,
     autoSaveMode,
     searchText,
-    terminalInput
+    terminalInput,
+    workflowHistory,
+    quickChipFavorites
   ]);
 
   useEffect(() => {
@@ -1359,10 +1683,10 @@ export function App() {
     };
   }, [layout]);
 
-  const openWorkspace = async () => {
+  const openWorkspace = async (): Promise<string | null> => {
     const root = await window.ide.openWorkspace();
     if (!root) {
-      return;
+      return null;
     }
     setTabs([]);
     setActiveTab(null);
@@ -1372,6 +1696,7 @@ export function App() {
     setShowLeftPane(true);
     setLeftTab("files");
     setLogs((prev) => [`[workspace] opened ${root}`, ...prev]);
+    return root;
   };
 
   const openFile = async (relPath: string) => {
@@ -1420,21 +1745,32 @@ export function App() {
     await refreshAudit();
   };
 
-  const runProjectSearch = async () => {
+  const runProjectSearch = async (queryOverride?: string) => {
     if (!workspaceRoot) {
       return;
     }
-    const hits = await window.ide.searchProject(workspaceRoot, searchText);
+    const query = (queryOverride ?? searchText).trim();
+    if (!query) {
+      return;
+    }
+    if (queryOverride !== undefined) {
+      setSearchText(query);
+    }
+    const hits = await window.ide.searchProject(workspaceRoot, query);
     setSearchHits(hits);
     setLeftTab("search");
     setShowLeftPane(true);
   };
 
-  const runCommand = async () => {
-    if (!workspaceRoot || !terminalInput.trim()) {
+  const runCommand = async (commandOverride?: string) => {
+    const command = (commandOverride ?? terminalInput).trim();
+    if (!workspaceRoot || !command) {
       return;
     }
-    const result = await window.ide.runCommand(workspaceRoot, terminalInput.trim());
+    if (commandOverride !== undefined) {
+      setTerminalInput(command);
+    }
+    const result = await window.ide.runCommand(workspaceRoot, command);
     const riskLabel = result.highRisk?.categories.length ? ` risk=${result.highRisk.categories.join(",")}` : "";
     setTerminalOutput((prev) => [`$ ${result.command}`, result.stdout, result.stderr, ...prev].slice(0, 400));
     setLogs((prev) => [`[terminal] ${result.policy.decision} ${result.command}${riskLabel}`, ...prev]);
@@ -1863,40 +2199,88 @@ export function App() {
     setLogs((prev) => [`[replay] loaded ${replay.length} terminal runs`, ...prev]);
   };
 
-  const runMultiAgentMode = async () => {
-    if (!multiAgentGoal.trim()) {
-      return;
+  const runMultiAgentGoal = async (
+    goalInput: string,
+    options?: { freeformRunId?: string }
+  ): Promise<MultiAgentRunOutcome> => {
+    const goal = goalInput.trim();
+    if (!goal) {
+      return { status: "error", error: "goal is empty" };
     }
-    const summary = await window.ide.runMultiAgentTask({
-      goal: multiAgentGoal.trim(),
-      acceptanceCriteria: [
-        "all checks pass",
-        "artifacts updated",
-        "risk notes documented"
-      ],
-      agentCount: multiAgentCount
-    });
-    setMultiAgentSummary(summary);
-    setPanelTab("agent");
-    setShowRightPane(true);
-    await refreshCheckpoints();
-    await refreshAudit();
-    setLogs((prev) => [
-      `[multi-agent] ${summary.coordinatorRunId} ${summary.overallStatus}`,
-      ...prev
-    ]);
+    pushAgentActivity("dispatch", `Launching ${multiAgentCount} agents for "${goal}"`);
+    setMultiAgentRunning(true);
+    try {
+      const summary = await window.ide.runMultiAgentTask({
+        goal,
+        acceptanceCriteria: [
+          "all checks pass",
+          "artifacts updated",
+          "risk notes documented"
+        ],
+        agentCount: multiAgentCount
+      });
+      if (options?.freeformRunId && canceledFreeformRunsRef.current.has(options.freeformRunId)) {
+        pushAgentActivity("cancelled", `Freeform run ${options.freeformRunId} was cancelled`);
+        setLogs((prev) => [`[workflow] freeform run cancelled ${options.freeformRunId}`, ...prev].slice(0, 200));
+        return { status: "cancelled" };
+      }
+      setMultiAgentGoal(goal);
+      setMultiAgentSummary(summary);
+      setPanelTab("agent");
+      setShowRightPane(true);
+      await refreshCheckpoints();
+      await refreshAudit();
+      pushAgentActivity(
+        "result",
+        `${summary.overallStatus} coordinator=${summary.coordinatorRunId} agents=${summary.agentRuns.length}`
+      );
+      setLogs((prev) => [
+        `[multi-agent] ${summary.coordinatorRunId} ${summary.overallStatus}`,
+        ...prev
+      ]);
+      return { status: "success" };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "multi-agent run failed";
+      if (options?.freeformRunId && canceledFreeformRunsRef.current.has(options.freeformRunId)) {
+        pushAgentActivity("cancelled", `Freeform run ${options.freeformRunId} was cancelled`);
+        setLogs((prev) => [`[workflow] freeform run cancelled ${options.freeformRunId}`, ...prev].slice(0, 200));
+        return { status: "cancelled" };
+      }
+      pushAgentActivity("error", message);
+      setLogs((prev) => [`[multi-agent] error: ${message}`, ...prev]);
+      return { status: "error", error: message };
+    } finally {
+      setMultiAgentRunning(false);
+      if (options?.freeformRunId) {
+        canceledFreeformRunsRef.current.delete(options.freeformRunId);
+        setFreeformRunStatus("idle");
+        setFreeformRunId((current) => (current === options.freeformRunId ? null : current));
+      }
+    }
   };
 
-  const runProjectBuilderMode = async () => {
-    if (!workspaceRoot || !builderProjectName.trim() || builderRunning) {
+  const runMultiAgentMode = async () => {
+    await runMultiAgentGoal(multiAgentGoal);
+  };
+
+  const runProjectBuilderMode = async (options?: { projectName?: string; outputDir?: string }) => {
+    const projectName = (options?.projectName ?? builderProjectName).trim();
+    const outputDir = (options?.outputDir ?? builderOutputDir).trim() || undefined;
+    if (!workspaceRoot || !projectName || builderRunning) {
       return;
+    }
+    if (options?.projectName !== undefined) {
+      setBuilderProjectName(projectName);
+    }
+    if (options?.outputDir !== undefined) {
+      setBuilderOutputDir(outputDir ?? "");
     }
     setBuilderRunning(true);
     try {
       const result = await window.ide.runProjectBuilder({
         workspaceRoot,
-        projectName: builderProjectName.trim(),
-        outputDir: builderOutputDir.trim() || undefined
+        projectName,
+        outputDir
       });
       setBuilderResult(result);
       await refreshTree(workspaceRoot);
@@ -1914,19 +2298,45 @@ export function App() {
     }
   };
 
-  const runMultiFileRefactorMode = async () => {
-    if (!workspaceRoot || !refactorFrom.trim() || !refactorTo.trim() || refactorRunning) {
+  const runMultiFileRefactorMode = async (
+    options?: { from?: string; to?: string; previewOnly?: boolean; allowSensitive?: boolean; maxFiles?: number }
+  ) => {
+    const from = (options?.from ?? refactorFrom).trim();
+    const to = (options?.to ?? refactorTo).trim();
+    const previewOnly = options?.previewOnly ?? refactorPreviewOnly;
+    const allowSensitive = options?.allowSensitive ?? refactorAllowSensitive;
+    const requestedMaxFiles = options?.maxFiles ?? Number(refactorMaxFiles);
+    const normalizedMaxFiles =
+      Number.isFinite(requestedMaxFiles) && requestedMaxFiles > 0 ? requestedMaxFiles : 1200;
+    const maxFiles = Math.max(20, Math.min(5000, normalizedMaxFiles));
+
+    if (!workspaceRoot || !from || !to || refactorRunning) {
       return;
+    }
+    if (options?.from !== undefined) {
+      setRefactorFrom(from);
+    }
+    if (options?.to !== undefined) {
+      setRefactorTo(to);
+    }
+    if (options?.previewOnly !== undefined) {
+      setRefactorPreviewOnly(previewOnly);
+    }
+    if (options?.allowSensitive !== undefined) {
+      setRefactorAllowSensitive(allowSensitive);
+    }
+    if (options?.maxFiles !== undefined) {
+      setRefactorMaxFiles(String(maxFiles));
     }
     setRefactorRunning(true);
     try {
       const result = await window.ide.runMultiFileRefactor({
         root: workspaceRoot,
-        from: refactorFrom.trim(),
-        to: refactorTo.trim(),
-        previewOnly: refactorPreviewOnly,
-        allowSensitive: refactorAllowSensitive,
-        maxFiles: Math.max(20, Math.min(5000, Number(refactorMaxFiles) || 1200))
+        from,
+        to,
+        previewOnly,
+        allowSensitive,
+        maxFiles
       });
       setRefactorResult(result);
       await refreshCheckpoints();
@@ -2315,7 +2725,419 @@ export function App() {
     setLogs((prev) => [`[release-notes] generated for ${draft.version}`, ...prev]);
   };
 
+  const pushAgentActivity = (stage: string, detail: string) => {
+    const item: AgentActivityItem = {
+      id: `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+      ts: new Date().toISOString(),
+      stage,
+      detail
+    };
+    setAgentActivityFeed((prev) => [item, ...prev].slice(0, 80));
+  };
+
+  const applyWorkflowSuggestion = (value: string) => {
+    setWorkflowInput(value);
+    setWorkflowFocused(true);
+    setWorkflowHistoryIndex(-1);
+    setWorkflowHistoryDraft("");
+    window.requestAnimationFrame(() => {
+      workflowInputRef.current?.focus();
+    });
+  };
+
+  const toggleQuickChipFavorite = (command: string) => {
+    setQuickChipFavorites((current) => {
+      if (current.includes(command)) {
+        return current.filter((item) => item !== command);
+      }
+      return [command, ...current].slice(0, 16);
+    });
+  };
+
+  const cancelFreeformRun = () => {
+    if (!freeformRunId || freeformRunStatus !== "running") {
+      return;
+    }
+    canceledFreeformRunsRef.current.add(freeformRunId);
+    setFreeformRunStatus("cancelling");
+    pushAgentActivity("cancel", `Cancellation requested for ${freeformRunId}`);
+    setLogs((prev) => [`[workflow] cancellation requested for ${freeformRunId}`, ...prev].slice(0, 200));
+  };
+
+  const handleWorkflowInputKeyDown = (event: ReactKeyboardEvent<HTMLInputElement>) => {
+    const total = workflowHistory.length;
+    const caretStart = event.currentTarget.selectionStart ?? workflowInput.length;
+    const caretEnd = event.currentTarget.selectionEnd ?? workflowInput.length;
+    const atStart = caretStart === 0;
+    const atEnd = caretEnd === workflowInput.length;
+
+    if (event.key === "ArrowUp") {
+      const canUseHistory = total > 0 && (workflowHistoryIndex >= 0 || (workflowInput.trim().length === 0 && atStart));
+      if (canUseHistory) {
+        event.preventDefault();
+        const nextIndex = workflowHistoryIndex < 0 ? total - 1 : Math.max(0, workflowHistoryIndex - 1);
+        if (workflowHistoryIndex < 0) {
+          setWorkflowHistoryDraft(workflowInput);
+        }
+        setWorkflowHistoryIndex(nextIndex);
+        setWorkflowInput(workflowHistory[nextIndex] ?? workflowInput);
+        return;
+      }
+      if (showWorkflowSuggestions) {
+        event.preventDefault();
+        setWorkflowSuggestionIndex((current) =>
+          current <= 0 ? workflowSuggestions.length - 1 : current - 1
+        );
+      }
+      return;
+    }
+
+    if (event.key === "ArrowDown") {
+      if (workflowHistoryIndex >= 0) {
+        event.preventDefault();
+        const nextIndex = workflowHistoryIndex + 1;
+        if (nextIndex >= total) {
+          setWorkflowHistoryIndex(-1);
+          setWorkflowInput(workflowHistoryDraft);
+          setWorkflowHistoryDraft("");
+          return;
+        }
+        setWorkflowHistoryIndex(nextIndex);
+        setWorkflowInput(workflowHistory[nextIndex] ?? workflowInput);
+        return;
+      }
+      if (showWorkflowSuggestions) {
+        event.preventDefault();
+        setWorkflowSuggestionIndex((current) =>
+          current >= workflowSuggestions.length - 1 ? 0 : current + 1
+        );
+      }
+      return;
+    }
+
+    if (event.key === "Tab" && showWorkflowSuggestions && workflowSuggestions[workflowSuggestionIndex]) {
+      event.preventDefault();
+      applyWorkflowSuggestion(workflowSuggestions[workflowSuggestionIndex].value);
+      return;
+    }
+
+    if (event.key === "Escape") {
+      if (showWorkflowSuggestions) {
+        event.preventDefault();
+        setWorkflowFocused(false);
+      }
+      return;
+    }
+
+    if ((event.key === "ArrowLeft" && !atStart) || (event.key === "ArrowRight" && !atEnd)) {
+      setWorkflowHistoryIndex(-1);
+      setWorkflowHistoryDraft("");
+    }
+  };
+
+  const slugifyWorkflowProject = (value: string): string =>
+    value
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "") || "atlas-website-stack";
+
+  const ensureWorkflowWorkspace = async (reason: string): Promise<boolean> => {
+    if (workspaceRoot) {
+      return true;
+    }
+    const root = await openWorkspace();
+    if (root) {
+      return true;
+    }
+    setLogs((prev) => [`[workflow] ${reason} requires a workspace`, ...prev].slice(0, 200));
+    return false;
+  };
+
+  const runWorkflowRequest = async (requestOverride?: string) => {
+    const request = (requestOverride ?? workflowInput).trim();
+    if (!request) {
+      return;
+    }
+    setWorkflowInput("");
+    setWorkflowFocused(false);
+    setWorkflowHistoryIndex(-1);
+    setWorkflowHistoryDraft("");
+    setWorkflowHistory((prev) => {
+      if (prev[prev.length - 1] === request) {
+        return prev;
+      }
+      return [...prev, request].slice(-60);
+    });
+    setLogs((prev) => [`[workflow] ${request}`, ...prev].slice(0, 200));
+
+    const normalized = request.toLowerCase();
+    const slashCommand = normalized.startsWith("/") ? normalized : null;
+    const command = slashCommand ?? "";
+
+    if (command === "/help") {
+      setLogs((prev) => [
+        "[workflow] commands: /open, /search <query>, /run <cmd>, /pipeline, /build <name>, /refactor <from> <to>, /agent, /plan, /diff, /checkpoints, /files, /terminal, /tests, /logs, /editor",
+        "[workflow] freeform prompts run in multi-agent mode automatically",
+        ...prev
+      ].slice(0, 200));
+      return;
+    }
+
+    if (command === "/open" || (!slashCommand && normalized.includes("open workspace"))) {
+      await openWorkspace();
+      return;
+    }
+
+    if (command === "/files" || normalized === "/file") {
+      toggleLeftFeature("files");
+      return;
+    }
+
+    if (command === "/editor") {
+      focusEditorOnly();
+      return;
+    }
+
+    if (command.startsWith("/search")) {
+      if (!(await ensureWorkflowWorkspace("Search"))) {
+        return;
+      }
+      const query = request.replace(/^\/search\s*/i, "").trim();
+      if (!query) {
+        toggleLeftFeature("search");
+        return;
+      }
+      await runProjectSearch(query);
+      return;
+    }
+
+    if (command === "/agent") {
+      toggleRightFeature("agent");
+      return;
+    }
+    if (command === "/plan") {
+      toggleRightFeature("plan");
+      return;
+    }
+    if (command === "/diff") {
+      toggleRightFeature("diff");
+      return;
+    }
+    if (command === "/checkpoints") {
+      toggleRightFeature("checkpoints");
+      return;
+    }
+    if (command === "/terminal") {
+      toggleBottomFeature("terminal");
+      return;
+    }
+    if (command === "/tests") {
+      toggleBottomFeature("tests");
+      return;
+    }
+    if (command === "/logs") {
+      toggleBottomFeature("logs");
+      return;
+    }
+
+    if (command.startsWith("/run ")) {
+      if (!(await ensureWorkflowWorkspace("Terminal command"))) {
+        return;
+      }
+      const cliCommand = request.replace(/^\/run\s+/i, "").trim();
+      if (!cliCommand) {
+        setLogs((prev) => ["[workflow] /run requires a command", ...prev].slice(0, 200));
+        return;
+      }
+      setBottomTab("terminal");
+      setShowBottomPane(true);
+      await runCommand(cliCommand);
+      return;
+    }
+
+    if (command === "/pipeline") {
+      if (!(await ensureWorkflowWorkspace("Pipeline"))) {
+        return;
+      }
+      setBottomTab("terminal");
+      setShowBottomPane(true);
+      await runPipeline();
+      return;
+    }
+
+    if (command.startsWith("/build ") || command.startsWith("/template ")) {
+      if (!(await ensureWorkflowWorkspace("Project builder"))) {
+        return;
+      }
+      const projectName = request.replace(/^\/(build|template)\s+/i, "").trim() || "Atlas Website Stack";
+      const outputDir = `generated-projects/${slugifyWorkflowProject(projectName)}`;
+      setPanelTab("agent");
+      setShowRightPane(true);
+      await runProjectBuilderMode({
+        projectName,
+        outputDir
+      });
+      return;
+    }
+
+    if (command.startsWith("/refactor ")) {
+      if (!(await ensureWorkflowWorkspace("Refactor"))) {
+        return;
+      }
+      const args = request
+        .replace(/^\/refactor\s+/i, "")
+        .split(/\s+/)
+        .map((item) => item.trim())
+        .filter(Boolean);
+      if (args.length < 2) {
+        setLogs((prev) => ["[workflow] /refactor requires: /refactor <from> <to>", ...prev].slice(0, 200));
+        return;
+      }
+      setPanelTab("agent");
+      setShowRightPane(true);
+      await runMultiFileRefactorMode({
+        from: args[0],
+        to: args[1],
+        previewOnly: true
+      });
+      return;
+    }
+
+    if (!slashCommand && /(run tests|test project|execute tests|run test suite)/.test(normalized)) {
+      if (!(await ensureWorkflowWorkspace("Testing"))) {
+        return;
+      }
+      setBottomTab("tests");
+      setShowBottomPane(true);
+      await runCommand("npm run test");
+      return;
+    }
+
+    if (!slashCommand && /(build website|create website|new website|make website|scaffold backend)/.test(normalized)) {
+      if (!(await ensureWorkflowWorkspace("Project builder"))) {
+        return;
+      }
+      const projectName = "Atlas Website Stack";
+      const outputDir = `generated-projects/${slugifyWorkflowProject(projectName)}`;
+      setPanelTab("agent");
+      setShowRightPane(true);
+      await runProjectBuilderMode({
+        projectName,
+        outputDir
+      });
+      setLogs((prev) => [
+        "[workflow] Website backend stack created. Next step: /run npm create vite@latest web -- --template react-ts",
+        ...prev
+      ].slice(0, 200));
+      return;
+    }
+
+    if (!slashCommand && /^(search|find)\s+/.test(normalized)) {
+      if (!(await ensureWorkflowWorkspace("Search"))) {
+        return;
+      }
+      const query = request.replace(/^(search|find)\s+/i, "").trim();
+      if (!query) {
+        toggleLeftFeature("search");
+        return;
+      }
+      await runProjectSearch(query);
+      return;
+    }
+
+    if (!slashCommand && /^(run|execute)\s+/.test(normalized)) {
+      if (!(await ensureWorkflowWorkspace("Terminal command"))) {
+        return;
+      }
+      const cliCommand = request.replace(/^(run|execute)\s+/i, "").trim();
+      if (!cliCommand) {
+        setLogs((prev) => ["[workflow] command text is missing", ...prev].slice(0, 200));
+        return;
+      }
+      setBottomTab("terminal");
+      setShowBottomPane(true);
+      await runCommand(cliCommand);
+      return;
+    }
+
+    if (!slashCommand) {
+      const uiMatch = normalized.match(
+        /\b(open|show|focus)\s+(files|search|agent|plan|diff|checkpoints|terminal|tests|logs|editor)\b/
+      );
+      if (uiMatch) {
+        const target = uiMatch[2];
+        if (target === "files") {
+          toggleLeftFeature("files");
+        } else if (target === "search") {
+          toggleLeftFeature("search");
+        } else if (target === "agent") {
+          toggleRightFeature("agent");
+        } else if (target === "plan") {
+          toggleRightFeature("plan");
+        } else if (target === "diff") {
+          toggleRightFeature("diff");
+        } else if (target === "checkpoints") {
+          toggleRightFeature("checkpoints");
+        } else if (target === "terminal") {
+          toggleBottomFeature("terminal");
+        } else if (target === "tests") {
+          toggleBottomFeature("tests");
+        } else if (target === "logs") {
+          toggleBottomFeature("logs");
+        } else if (target === "editor") {
+          focusEditorOnly();
+        }
+        return;
+      }
+    }
+
+    if (!slashCommand) {
+      const renameMatch = request.match(/\brefactor\s+([A-Za-z0-9_.$-]+)\s+(?:to|->)\s+([A-Za-z0-9_.$-]+)\b/i);
+      if (renameMatch) {
+        if (!(await ensureWorkflowWorkspace("Refactor"))) {
+          return;
+        }
+        const [, from, to] = renameMatch;
+        setPanelTab("agent");
+        setShowRightPane(true);
+        await runMultiFileRefactorMode({
+          from,
+          to,
+          previewOnly: true
+        });
+        return;
+      }
+    }
+
+    if (!slashCommand) {
+      if (!(await ensureWorkflowWorkspace("Agent task"))) {
+        return;
+      }
+      if (freeformRunStatus !== "idle") {
+        setLogs((prev) => ["[workflow] freeform run already active. cancel or wait.", ...prev].slice(0, 200));
+        return;
+      }
+      const nextFreeformRunId = `freeform-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
+      setFreeformRunId(nextFreeformRunId);
+      setFreeformRunStatus("running");
+      setPanelTab("agent");
+      setShowRightPane(true);
+      setLogs((prev) => ["[workflow] routing request to multi-agent mode", ...prev].slice(0, 200));
+      pushAgentActivity("intake", request);
+      pushAgentActivity("plan", "Routing freeform request through multi-agent orchestration");
+      await runMultiAgentGoal(request, { freeformRunId: nextFreeformRunId });
+      return;
+    }
+
+    setPanelTab("agent");
+    setShowRightPane(true);
+    setLogs((prev) => ["[workflow] Unknown slash command. Type /help.", ...prev].slice(0, 200));
+  };
+
   const breadcrumbs = activeTab ? activeTab.split("/") : [];
+  const workspaceLabel = workspaceRoot
+    ? workspaceRoot.split(/[/\\]/).filter(Boolean).pop() ?? workspaceRoot
+    : "No workspace";
   const leftWidth = showLeftPane ? layout.leftWidth : 0;
   const rightWidth = showRightPane ? layout.rightWidth : 0;
   const bottomHeight = showBottomPane ? layout.bottomHeight : 0;
@@ -2339,20 +3161,393 @@ export function App() {
     );
   }
 
+  if (uiShellMode === "codex") {
+    return (
+      <div className="codex-shell-v2" aria-label="Atlas Meridian Codex shell">
+        <a className="skip-link" href="#codex-main">Skip to main content</a>
+        <div className="sr-only" aria-live="polite" aria-atomic="true">{accessibilityStatus}</div>
+        <aside className="codex-sidebar">
+          <div className="codex-brand">
+            <span className="logo-dot" />
+            <strong>Atlas Meridian</strong>
+          </div>
+          <nav className="codex-nav">
+            <button
+              onClick={() => {
+                setWorkflowInput("");
+                setWorkflowFocused(true);
+                window.requestAnimationFrame(() => workflowInputRef.current?.focus());
+              }}
+            >
+              New thread
+            </button>
+            <button onClick={() => setPanelTab("plan")}>Automations</button>
+            <button onClick={() => setPanelTab("agent")}>Skills</button>
+          </nav>
+          <div className="codex-thread-header">
+            <span>Threads</span>
+            <button
+              aria-label="Refresh threads"
+              onClick={() => {
+                setSelectedThreadId(threadNavItems[0]?.id ?? null);
+              }}
+            >
+              ↻
+            </button>
+          </div>
+          <div className="codex-thread-list">
+            {threadNavItems.map((item) => (
+              <button
+                key={item.id}
+                className={selectedThread?.id === item.id ? "active" : ""}
+                onClick={() => setSelectedThreadId(item.id)}
+              >
+                <strong>{item.title}</strong>
+                <span>{item.subtitle}</span>
+              </button>
+            ))}
+          </div>
+          <div className="codex-sidebar-footer">
+            <button onClick={() => setUiShellMode("legacy")}>Legacy Layout</button>
+          </div>
+        </aside>
+
+        <main id="codex-main" className="codex-main-pane">
+          <header className="codex-main-header">
+            <div className="codex-main-title">
+              <strong>{selectedThread?.title ?? "New thread"}</strong>
+              <span>{workspaceLabel}</span>
+            </div>
+            <div className="codex-main-actions">
+              <span className={`run-badge ${runState}`}>{runState.toUpperCase()}</span>
+              <button onClick={openWorkspace}>Open</button>
+              <button
+                onClick={() => {
+                  setPanelTab("diff");
+                  setShowRightPane(true);
+                }}
+              >
+                Changes
+              </button>
+              <button
+                onClick={() => {
+                  setBottomTab("terminal");
+                  setShowBottomPane(true);
+                  void runCommand("git status --short");
+                }}
+              >
+                Commit
+              </button>
+              {freeformRunStatus !== "idle" ? (
+                <button onClick={cancelFreeformRun} disabled={freeformRunStatus !== "running"}>
+                  {freeformRunStatus === "cancelling" ? "Cancelling..." : "Stop"}
+                </button>
+              ) : null}
+            </div>
+          </header>
+
+          <section className="codex-main-scroll">
+            <div className="codex-turn-card">
+              <strong>Run status</strong>
+              <span>{runStateDetail}</span>
+              <code>workspace: {workspaceRoot ?? "none"}</code>
+              <code>turns: {workflowHistory.length}</code>
+              <code>changes: {filteredChangeCards.length} files</code>
+            </div>
+            <div className="codex-turn-card">
+              <strong>Recent execution output</strong>
+              {timelineLines.length > 0 ? (
+                timelineLines.map((line, index) => (
+                  <code key={`timeline-${index}-${line.slice(0, 14)}`}>{line}</code>
+                ))
+              ) : (
+                <p className="empty">No turn output yet. Send a request below.</p>
+              )}
+            </div>
+            {agentActivityFeed.length > 0 ? (
+              <div className="codex-turn-card">
+                <strong>Agent activity</strong>
+                {agentActivityFeed.slice(0, 10).map((entry) => (
+                  <code key={entry.id}>[{entry.ts}] {entry.stage}: {entry.detail}</code>
+                ))}
+              </div>
+            ) : null}
+          </section>
+
+          <footer className="codex-composer-dock">
+            <form
+              className="workflow-composer codex-compose-form"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void runWorkflowRequest();
+              }}
+              aria-label="Atlas workflow composer"
+            >
+              <input
+                ref={workflowInputRef}
+                value={workflowInput}
+                onChange={(event) => {
+                  setWorkflowInput(event.target.value);
+                  setWorkflowHistoryIndex(-1);
+                  setWorkflowHistoryDraft("");
+                }}
+                onKeyDown={handleWorkflowInputKeyDown}
+                onFocus={() => {
+                  if (workflowBlurTimerRef.current !== null) {
+                    window.clearTimeout(workflowBlurTimerRef.current);
+                  }
+                  setWorkflowFocused(true);
+                }}
+                onBlur={() => {
+                  if (workflowBlurTimerRef.current !== null) {
+                    window.clearTimeout(workflowBlurTimerRef.current);
+                  }
+                  workflowBlurTimerRef.current = window.setTimeout(() => {
+                    setWorkflowFocused(false);
+                  }, 120);
+                }}
+                placeholder="Ask Atlas..."
+                aria-label="Ask Atlas"
+                aria-autocomplete="list"
+                aria-expanded={showWorkflowSuggestions}
+              />
+              <button type="submit">Send</button>
+              <div className="slash-help" aria-label="Slash command help">
+                <button type="button" aria-label="Show slash command cheat sheet">/</button>
+                <div className="slash-help-panel">
+                  <strong>Slash Commands</strong>
+                  {slashHelpEntries.map((entry) => (
+                    <div key={entry.command} className="slash-help-entry">
+                      <code>{entry.command}</code>
+                      <span>{entry.description}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              {showWorkflowSuggestions ? (
+                <div className="workflow-suggestions" role="listbox" aria-label="Workflow suggestions">
+                  {workflowSuggestions.map((suggestion, index) => (
+                    <button
+                      key={`${suggestion.value}-${index}`}
+                      type="button"
+                      role="option"
+                      aria-selected={index === workflowSuggestionIndex}
+                      className={`workflow-suggestion ${index === workflowSuggestionIndex ? "active" : ""}`}
+                      onMouseEnter={() => setWorkflowSuggestionIndex(index)}
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={() => applyWorkflowSuggestion(suggestion.value)}
+                    >
+                      <span>{suggestion.label}</span>
+                      <small>{suggestion.description}</small>
+                      <code>{suggestion.value}</code>
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </form>
+            <div className="codex-composer-meta">
+              <span>Model: GPT-5.3-Codex</span>
+              <span>Effort: High</span>
+              <button onClick={() => setCommandPaletteOpen(true)}>Palette</button>
+              <button onClick={() => setUiShellMode("legacy")}>Legacy</button>
+            </div>
+          </footer>
+        </main>
+
+        <aside className="codex-right-pane">
+          <div className="codex-right-header">
+            <strong>Last turn changes</strong>
+            <span>{filteredChangeCards.length} files</span>
+          </div>
+          <div className="codex-right-section">
+            <input
+              value={changeFilterText}
+              onChange={(event) => setChangeFilterText(event.target.value)}
+              placeholder="Filter changed files..."
+              aria-label="Filter changed files"
+            />
+            <div className="codex-change-list">
+              {filteredChangeCards.map((item) => (
+                <button key={`change-${item.file}`} onClick={() => { void openFile(item.file); }}>
+                  <strong>{item.file}</strong>
+                  <span>touches {item.touches}</span>
+                  <code>+{item.additions} -{item.deletions}</code>
+                </button>
+              ))}
+              {filteredChangeCards.length === 0 ? <p className="empty">No tracked changes yet.</p> : null}
+            </div>
+          </div>
+          <div className="codex-right-section">
+            <div className="codex-right-subhead">
+              <strong>Workspace files</strong>
+              <span>{filteredExplorerFiles.length}</span>
+            </div>
+            <input
+              value={explorerFilterText}
+              onChange={(event) => setExplorerFilterText(event.target.value)}
+              placeholder="Filter files..."
+              aria-label="Filter workspace files"
+            />
+            <div className="codex-file-list">
+              {filteredExplorerFiles.slice(0, 180).map((file) => (
+                <button key={`file-${file}`} onClick={() => { void openFile(file); }}>
+                  {file}
+                </button>
+              ))}
+              {filteredExplorerFiles.length === 0 ? <p className="empty">No files in workspace.</p> : null}
+            </div>
+          </div>
+        </aside>
+      </div>
+    );
+  }
+
   return (
-    <div className="app-shell simple-ui" aria-label="Atlas Meridian">
+    <div className="app-shell codex-ui" aria-label="Atlas Meridian">
       <a className="skip-link" href="#main-content">Skip to main content</a>
       <div className="sr-only" aria-live="polite" aria-atomic="true">{accessibilityStatus}</div>
       <header className="topbar">
-        <div className="logo-wrap">
-          <span className="logo-dot" />
-          <strong>Atlas Meridian</strong>
+        <div className="topbar-left">
+          <div className="logo-wrap">
+            <span className="logo-dot" />
+            <strong>Atlas Meridian</strong>
+          </div>
+          <span className="workspace-pill" title={workspaceRoot ?? "No workspace selected"}>
+            {workspaceLabel}
+          </span>
         </div>
-        <div className="header-actions">
-          <button onClick={openWorkspace} aria-label="Open workspace folder">Open Workspace</button>
-          <button onClick={() => setCommandPaletteOpen(true)} aria-haspopup="dialog" aria-expanded={commandPaletteOpen}>
-            Command Palette
+        <form
+          className="workflow-composer"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void runWorkflowRequest();
+          }}
+          aria-label="Atlas workflow composer"
+        >
+          <input
+            ref={workflowInputRef}
+            value={workflowInput}
+            onChange={(event) => {
+              setWorkflowInput(event.target.value);
+              setWorkflowHistoryIndex(-1);
+              setWorkflowHistoryDraft("");
+            }}
+            onKeyDown={handleWorkflowInputKeyDown}
+            onFocus={() => {
+              if (workflowBlurTimerRef.current !== null) {
+                window.clearTimeout(workflowBlurTimerRef.current);
+              }
+              setWorkflowFocused(true);
+            }}
+            onBlur={() => {
+              if (workflowBlurTimerRef.current !== null) {
+                window.clearTimeout(workflowBlurTimerRef.current);
+              }
+              workflowBlurTimerRef.current = window.setTimeout(() => {
+                setWorkflowFocused(false);
+              }, 120);
+            }}
+            placeholder="Ask Atlas or use /help, /run, /search, /build"
+            aria-label="Ask Atlas"
+            aria-autocomplete="list"
+            aria-expanded={showWorkflowSuggestions}
+          />
+          <button type="submit">Send</button>
+          <div className="slash-help" aria-label="Slash command help">
+            <button type="button" aria-label="Show slash command cheat sheet">/</button>
+            <div className="slash-help-panel">
+              <strong>Slash Commands</strong>
+              {slashHelpEntries.map((entry) => (
+                <div key={entry.command} className="slash-help-entry">
+                  <code>{entry.command}</code>
+                  <span>{entry.description}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+          {showWorkflowSuggestions ? (
+            <div className="workflow-suggestions" role="listbox" aria-label="Workflow suggestions">
+              {workflowSuggestions.map((suggestion, index) => (
+                <button
+                  key={`${suggestion.value}-${index}`}
+                  type="button"
+                  role="option"
+                  aria-selected={index === workflowSuggestionIndex}
+                  className={`workflow-suggestion ${index === workflowSuggestionIndex ? "active" : ""}`}
+                  onMouseEnter={() => setWorkflowSuggestionIndex(index)}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => applyWorkflowSuggestion(suggestion.value)}
+                >
+                  <span>{suggestion.label}</span>
+                  <small>{suggestion.description}</small>
+                  <code>{suggestion.value}</code>
+                </button>
+              ))}
+            </div>
+          ) : null}
+        </form>
+        <div className="toolbar-utilities">
+          <div className="run-state-badges" aria-label="Execution state">
+            <span className={`run-badge ${runState}`}>{runState.toUpperCase()}</span>
+            <span className="run-detail">{runStateDetail}</span>
+          </div>
+          {freeformRunStatus !== "idle" ? (
+            <button onClick={cancelFreeformRun} disabled={freeformRunStatus !== "running"}>
+              {freeformRunStatus === "cancelling" ? "Cancelling..." : "Cancel Freeform"}
+            </button>
+          ) : null}
+          <button onClick={openWorkspace} aria-label="Open workspace folder">Open</button>
+          <button
+            className={showRightPane && panelTab === "agent" ? "active" : ""}
+            onClick={() => toggleRightFeature("agent")}
+          >
+            Agent
           </button>
+          <button
+            className={showBottomPane && bottomTab === "terminal" ? "active" : ""}
+            onClick={() => toggleBottomFeature("terminal")}
+          >
+            Terminal
+          </button>
+          <button onClick={() => setCommandPaletteOpen(true)} aria-haspopup="dialog" aria-expanded={commandPaletteOpen}>
+            Palette
+          </button>
+          <button
+            className={advancedControls ? "active" : ""}
+            onClick={() => setAdvancedControls((flag) => !flag)}
+          >
+            {advancedControls ? "Basic" : "Advanced"}
+          </button>
+        </div>
+      </header>
+      <div className="quick-command-row" aria-label="Quick workflow commands">
+        {orderedQuickChips.map((chip) => {
+          const pinned = quickChipFavorites.includes(chip.command);
+          return (
+            <div key={chip.command} className={`quick-chip-item ${pinned ? "pinned" : ""}`}>
+              <button
+                className="quick-chip-run"
+                onClick={() => {
+                  void runWorkflowRequest(chip.command);
+                }}
+              >
+                {chip.label}
+              </button>
+              <button
+                className="quick-chip-pin"
+                onClick={() => toggleQuickChipFavorite(chip.command)}
+                aria-label={pinned ? `Unpin ${chip.label}` : `Pin ${chip.label}`}
+                title={pinned ? "Unpin command" : "Pin command"}
+              >
+                {pinned ? "★" : "☆"}
+              </button>
+            </div>
+          );
+        })}
+      </div>
+
+      {advancedControls ? (
+        <div className="header-actions" aria-label="Advanced panels">
           <button
             className={!showLeftPane && !showRightPane && !showBottomPane ? "active" : ""}
             onClick={focusEditorOnly}
@@ -2426,7 +3621,7 @@ export function App() {
             <option value="onBlur">Save: Blur</option>
           </select>
         </div>
-      </header>
+      ) : null}
 
       <div
         id="main-content"
@@ -2462,7 +3657,7 @@ export function App() {
                   placeholder="Search project"
                   aria-label="Search project"
                 />
-                <button onClick={runProjectSearch}>Go</button>
+                <button onClick={() => { void runProjectSearch(); }}>Go</button>
               </div>
               {workspaceRoot ? renderTree(tree, openFile) : <p className="empty">Select a workspace to begin.</p>}
             </div>
@@ -2622,6 +3817,23 @@ export function App() {
               <p>Grounded chat mode and task orchestration surface.</p>
               <p>Current workspace: <code>{workspaceRoot ?? "none"}</code></p>
               <p>Patch queue depth: <strong>{patchQueue.length}</strong></p>
+              <div className="checkpoint-card">
+                <strong>Live Agent Progress</strong>
+                {agentActivityFeed.length > 0 ? (
+                  <>
+                    {agentActivityFeed.slice(0, 12).map((entry) => (
+                      <code key={entry.id}>
+                        [{entry.ts}] {entry.stage}: {entry.detail}
+                      </code>
+                    ))}
+                    <div className="inline-search">
+                      <button onClick={() => setAgentActivityFeed([])}>Clear Feed</button>
+                    </div>
+                  </>
+                ) : (
+                  <p className="empty">No live activity yet. Send a freeform request in Ask Atlas.</p>
+                )}
+              </div>
               <div className="checkpoint-card">
                 <strong>Parallel Multi-Agent Mode</strong>
                 <input
@@ -3638,7 +4850,7 @@ export function App() {
                   placeholder="Run command"
                   aria-label="Terminal command"
                 />
-                <button onClick={runCommand}>Run</button>
+                <button onClick={() => { void runCommand(); }}>Run</button>
                 <button onClick={() => { void startPtySession(); }}>Start PTY Session</button>
                 <button onClick={() => { void stopPtySession(); }} disabled={!terminalSessionId || terminalSessionStatus !== "running"}>
                   Stop PTY Session

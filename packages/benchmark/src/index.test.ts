@@ -99,14 +99,88 @@ describe("benchmark", () => {
         ts: "2026-02-18T00:05:00.000Z",
         value: 220,
         tags: { org: "o", repo: "r", branch: "b", run_id: "6" }
+      },
+      {
+        metric_name: "human_intervention_rate",
+        ts: "2026-02-18T00:00:00.000Z",
+        value: 0.12,
+        tags: { org: "o", repo: "r", branch: "b", run_id: "1" }
+      },
+      {
+        metric_name: "human_intervention_rate",
+        ts: "2026-02-18T00:01:00.000Z",
+        value: 0.1,
+        tags: { org: "o", repo: "r", branch: "b", run_id: "2" }
+      },
+      {
+        metric_name: "human_intervention_rate",
+        ts: "2026-02-18T00:02:00.000Z",
+        value: 0.09,
+        tags: { org: "o", repo: "r", branch: "b", run_id: "3" }
+      },
+      {
+        metric_name: "human_intervention_rate",
+        ts: "2026-02-18T00:03:00.000Z",
+        value: 0.08,
+        tags: { org: "o", repo: "r", branch: "b", run_id: "4" }
+      },
+      {
+        metric_name: "human_intervention_rate",
+        ts: "2026-02-18T00:04:00.000Z",
+        value: 0.07,
+        tags: { org: "o", repo: "r", branch: "b", run_id: "5" }
+      },
+      {
+        metric_name: "human_intervention_rate",
+        ts: "2026-02-18T00:05:00.000Z",
+        value: 0.06,
+        tags: { org: "o", repo: "r", branch: "b", run_id: "6" }
+      },
+      {
+        metric_name: "green_pipeline_guarantee_rate",
+        ts: "2026-02-18T00:00:00.000Z",
+        value: 0.97,
+        tags: { org: "o", repo: "r", branch: "b", run_id: "1" }
+      },
+      {
+        metric_name: "green_pipeline_guarantee_rate",
+        ts: "2026-02-18T00:01:00.000Z",
+        value: 0.96,
+        tags: { org: "o", repo: "r", branch: "b", run_id: "2" }
+      },
+      {
+        metric_name: "green_pipeline_guarantee_rate",
+        ts: "2026-02-18T00:02:00.000Z",
+        value: 0.95,
+        tags: { org: "o", repo: "r", branch: "b", run_id: "3" }
+      },
+      {
+        metric_name: "green_pipeline_guarantee_rate",
+        ts: "2026-02-18T00:03:00.000Z",
+        value: 0.82,
+        tags: { org: "o", repo: "r", branch: "b", run_id: "4" }
+      },
+      {
+        metric_name: "green_pipeline_guarantee_rate",
+        ts: "2026-02-18T00:04:00.000Z",
+        value: 0.78,
+        tags: { org: "o", repo: "r", branch: "b", run_id: "5" }
+      },
+      {
+        metric_name: "green_pipeline_guarantee_rate",
+        ts: "2026-02-18T00:05:00.000Z",
+        value: 0.72,
+        tags: { org: "o", repo: "r", branch: "b", run_id: "6" }
       }
     ]);
 
     const records = await readMetricsStore(path);
     const alerts = buildTrendAlerts(records, { warningPercent: 0.1, criticalPercent: 0.2 });
 
-    expect(records.length).toBe(6);
-    expect(alerts.length).toBeGreaterThan(0);
-    expect(alerts[0]?.severity).toMatch(/warning|critical/);
+    expect(records.length).toBe(18);
+    expect(alerts.length).toBe(2);
+    expect(alerts.some((alert) => alert.metricName === "agent_task_completion_time")).toBe(true);
+    expect(alerts.some((alert) => alert.metricName === "green_pipeline_guarantee_rate")).toBe(true);
+    expect(alerts.some((alert) => alert.metricName === "human_intervention_rate")).toBe(false);
   });
 });

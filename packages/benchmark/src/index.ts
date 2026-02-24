@@ -540,16 +540,18 @@ export async function readMetricsStore(path: string): Promise<MetricRecord[]> {
   }
 }
 
+const LOWER_IS_BETTER_METRICS = new Set([
+  "agent_task_completion_time",
+  "tool_calls_per_task",
+  "diff_churn",
+  "index_freshness_small_ms",
+  "index_freshness_batch_ms",
+  "inline_suggestion_latency_p95",
+  "human_intervention_rate"
+]);
+
 function directionForMetric(metricName: string): "increase" | "decrease" {
-  if (
-    metricName.includes("rate") ||
-    metricName.includes("ratio") ||
-    metricName.includes("completeness") ||
-    metricName.includes("determinism")
-  ) {
-    return "decrease";
-  }
-  return "increase";
+  return LOWER_IS_BETTER_METRICS.has(metricName) ? "decrease" : "increase";
 }
 
 export function buildTrendAlerts(
@@ -584,7 +586,7 @@ export function buildTrendAlerts(
 
     const delta = (current - baseline) / Math.abs(baseline);
     const direction = directionForMetric(metricName);
-    const regression = direction === "increase" ? delta > 0 : delta < 0;
+    const regression = direction === "increase" ? delta < 0 : delta > 0;
 
     if (!regression) {
       continue;

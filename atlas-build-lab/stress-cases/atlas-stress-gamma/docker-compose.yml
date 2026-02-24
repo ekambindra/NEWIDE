@@ -1,0 +1,38 @@
+services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./db/init:/docker-entrypoint-initdb.d
+
+  api:
+    image: node:22
+    working_dir: /workspace
+    command: sh -lc "npm install && npm run dev --workspace @template/api-service"
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      API_PORT: ${API_PORT}
+    ports:
+      - "4000:4000"
+    volumes:
+      - ./:/workspace
+    depends_on:
+      - postgres
+
+  worker:
+    image: node:22
+    working_dir: /workspace
+    command: sh -lc "npm install && npm run dev --workspace @template/worker-service"
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      WORKER_INTERVAL_MS: ${WORKER_INTERVAL_MS}
+    volumes:
+      - ./:/workspace
+    depends_on:
+      - postgres

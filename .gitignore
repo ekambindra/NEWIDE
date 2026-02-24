@@ -9,3 +9,5 @@ checkpoints
 .env
 .atlas-meridian-control-plane
 apps/control-plane/.atlas-meridian-control-plane
+.atlas-checkpoints
+apps/desktop/release

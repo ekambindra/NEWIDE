@@ -44,5 +44,38 @@ describe("session snapshot normalization", () => {
     expect(normalized?.tabs[0]?.content.length).toBeLessThanOrEqual(120_000);
     expect(normalized?.tabs[0]?.originalContent.length).toBeLessThanOrEqual(120_000);
   });
-});
 
+  it("normalizes workflow history and bounds size", () => {
+    const history = Array.from({ length: 75 }, (_, index) =>
+      index % 7 === 0 ? "   " : `command-${index}-${"x".repeat(800)}`
+    );
+
+    const normalized = normalizeSessionSnapshot({
+      workflowHistory: history
+    });
+
+    expect(normalized).not.toBeNull();
+    expect(normalized?.workflowHistory.length).toBeLessThanOrEqual(60);
+    expect(normalized?.workflowHistory.every((entry) => entry.length > 0)).toBe(true);
+    expect(normalized?.workflowHistory.every((entry) => entry.length <= 500)).toBe(true);
+  });
+
+  it("normalizes quick chip favorites and removes duplicates", () => {
+    const normalized = normalizeSessionSnapshot({
+      quickChipFavorites: [
+        "",
+        " /pipeline ",
+        "/pipeline",
+        "/run npm run test",
+        "/run npm run test",
+        "x".repeat(300)
+      ]
+    });
+
+    expect(normalized).not.toBeNull();
+    expect(normalized?.quickChipFavorites.length).toBe(3);
+    expect(normalized?.quickChipFavorites[0]).toBe("/pipeline");
+    expect(normalized?.quickChipFavorites[1]).toBe("/run npm run test");
+    expect(normalized?.quickChipFavorites[2]?.length).toBeLessThanOrEqual(120);
+  });
+});

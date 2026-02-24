@@ -1,0 +1,15 @@
+{
+  "name": "atlas_stress_epsilon",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "services/*"
+  ],
+  "scripts": {
+    "dev:api": "npm run dev --workspace @template/api-service",
+    "dev:worker": "npm run dev --workspace @template/worker-service",
+    "lint": "npm run lint --workspaces",
+    "test": "npm run test --workspaces",
+    "build": "npm run build --workspaces"
+  }
+}

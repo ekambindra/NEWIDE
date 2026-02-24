@@ -31,9 +31,21 @@ describe("project builder", () => {
 
     const apiSource = await readFile(join(result.projectRoot, "services/api/src/server.ts"), "utf8");
     expect(apiSource.includes("createServer")).toBe(true);
+    expect(apiSource.includes("buildHealthPayload")).toBe(true);
+    expect(apiSource.includes("startServer")).toBe(true);
+    expect(apiSource.includes("fileURLToPath(import.meta.url)")).toBe(true);
+
+    const apiTest = await readFile(join(result.projectRoot, "services/api/test/server.test.ts"), "utf8");
+    expect(apiTest.includes("buildRoutePayload")).toBe(true);
 
     const workerSource = await readFile(join(result.projectRoot, "services/worker/src/worker.ts"), "utf8");
     expect(workerSource.includes("setInterval")).toBe(true);
+    expect(workerSource.includes("buildTickPayload")).toBe(true);
+    expect(workerSource.includes("startWorker")).toBe(true);
+    expect(workerSource.includes("fileURLToPath(import.meta.url)")).toBe(true);
+
+    const workerTest = await readFile(join(result.projectRoot, "services/worker/test/worker.test.ts"), "utf8");
+    expect(workerTest.includes("worker-service")).toBe(true);
 
     const sql = await readFile(join(result.projectRoot, "db/init/001_init.sql"), "utf8");
     expect(sql.includes("CREATE TABLE IF NOT EXISTS jobs")).toBe(true);

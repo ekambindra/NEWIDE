@@ -81,6 +81,12 @@ import {
 
 const execFileAsync = promisify(execFile);
 const MAIN_DIST_DIR = dirname(fileURLToPath(import.meta.url));
+const APP_NAME = "Atlas";
+
+app.setName(APP_NAME);
+app.setAboutPanelOptions({
+  applicationName: APP_NAME
+});
 
 function resolveFirstExisting(candidates: string[]): string {
   for (const candidate of candidates) {
@@ -2558,6 +2564,7 @@ async function createWindow(): Promise<void> {
     height: 980,
     minWidth: 1150,
     minHeight: 700,
+    title: APP_NAME,
     titleBarStyle: "hiddenInset",
     webPreferences: {
       preload: preloadPath,
