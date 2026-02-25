@@ -1,0 +1,384 @@
+{
+  "generatedAt": "2026-02-25T18:59:28.214Z",
+  "scoreCard": {
+    "total": 36,
+    "passRate": 0.9166666666666666,
+    "avgDuration": 264.55555555555554,
+    "avgRetries": 0.6666666666666666,
+    "avgToolCalls": 13.75,
+    "avgDiffChurn": 67.52777777777777,
+    "avgTimeToGreen": 264.55555555555554,
+    "determinismRate": 1,
+    "groundedEditRatio": 0.9859179959795435,
+    "fixLoopSuccessRate": 0.9722222222222222,
+    "artifactCompleteness": 1,
+    "humanInterventionRate": 0.027777777777777776,
+    "crossFileRefactorSuccess30": 1,
+    "crossFileRefactorSuccess100": 1,
+    "regressionBudget": {
+      "applicable": 36,
+      "withinBudget": 36,
+      "adherenceRate": 1,
+      "violations": []
+    },
+    "kpis": [
+      {
+        "name": "repo_to_production_readiness_time",
+        "value": 379,
+        "target": 480,
+        "comparator": "lte",
+        "meetsTarget": true,
+        "unit": "seconds"
+      },
+      {
+        "name": "green_pipeline_guarantee_rate",
+        "value": 0.9166666666666666,
+        "target": 0.9,
+        "comparator": "gte",
+        "meetsTarget": true,
+        "unit": "ratio"
+      },
+      {
+        "name": "artifact_completeness",
+        "value": 1,
+        "target": 1,
+        "comparator": "gte",
+        "meetsTarget": true,
+        "unit": "ratio"
+      },
+      {
+        "name": "fix_loop_success_rate",
+        "value": 0.9722222222222222,
+        "target": 0.8,
+        "comparator": "gte",
+        "meetsTarget": true,
+        "unit": "ratio"
+      },
+      {
+        "name": "cross_file_refactor_success_30",
+        "value": 1,
+        "target": 0.9,
+        "comparator": "gte",
+        "meetsTarget": true,
+        "unit": "ratio"
+      },
+      {
+        "name": "cross_file_refactor_success_100",
+        "value": 1,
+        "target": 0.75,
+        "comparator": "gte",
+        "meetsTarget": true,
+        "unit": "ratio"
+      },
+      {
+        "name": "grounded_edit_ratio",
+        "value": 0.9859179959795435,
+        "target": 0.98,
+        "comparator": "gte",
+        "meetsTarget": true,
+        "unit": "ratio"
+      },
+      {
+        "name": "regression_budget_adherence",
+        "value": 1,
+        "target": 0.95,
+        "comparator": "gte",
+        "meetsTarget": true,
+        "unit": "ratio"
+      },
+      {
+        "name": "replay_determinism_rate",
+        "value": 1,
+        "target": 0.95,
+        "comparator": "gte",
+        "meetsTarget": true,
+        "unit": "ratio"
+      },
+      {
+        "name": "checkpoint_integrity",
+        "value": 1,
+        "target": 1,
+        "comparator": "gte",
+        "meetsTarget": true,
+        "unit": "ratio"
+      },
+      {
+        "name": "non_destructive_rate",
+        "value": 1,
+        "target": 0.999,
+        "comparator": "gte",
+        "meetsTarget": true,
+        "unit": "ratio"
+      },
+      {
+        "name": "pr_readiness_score",
+        "value": 0.9755125776631757,
+        "target": 0.95,
+        "comparator": "gte",
+        "meetsTarget": true,
+        "unit": "ratio"
+      },
+      {
+        "name": "reviewer_mode_precision",
+        "value": 0.9508319481094885,
+        "target": 0.9,
+        "comparator": "gte",
+        "meetsTarget": true,
+        "unit": "ratio"
+      },
+      {
+        "name": "decision_log_coverage",
+        "value": 0.9609226325526833,
+        "target": 0.9,
+        "comparator": "gte",
+        "meetsTarget": true,
+        "unit": "ratio"
+      },
+      {
+        "name": "index_freshness_small_ms",
+        "value": 149.94444444444446,
+        "target": 200,
+        "comparator": "lte",
+        "meetsTarget": true,
+        "unit": "milliseconds"
+      },
+      {
+        "name": "index_freshness_batch_ms",
+        "value": 1571.7222222222222,
+        "target": 2000,
+        "comparator": "lte",
+        "meetsTarget": true,
+        "unit": "milliseconds"
+      },
+      {
+        "name": "inline_suggestion_latency_p95",
+        "value": 218,
+        "target": 250,
+        "comparator": "lte",
+        "meetsTarget": true,
+        "unit": "milliseconds"
+      },
+      {
+        "name": "human_intervention_rate",
+        "value": 0.027777777777777776,
+        "target": 0.15,
+        "comparator": "lte",
+        "meetsTarget": true,
+        "unit": "ratio"
+      },
+      {
+        "name": "agent_task_completion_time",
+        "value": 264.55555555555554,
+        "target": 300,
+        "comparator": "lte",
+        "meetsTarget": true,
+        "unit": "seconds"
+      }
+    ],
+    "metrics": [
+      {
+        "metric_name": "green_pipeline_guarantee_rate",
+        "ts": "2026-02-25T18:59:28.204Z",
+        "value": 0.9166666666666666,
+        "tags": {
+          "org": "local",
+          "repo": "workspace",
+          "branch": "main",
+          "run_id": "ga-20260225T185928Z-seed1337"
+        }
+      },
+      {
+        "metric_name": "agent_task_completion_time",
+        "ts": "2026-02-25T18:59:28.204Z",
+        "value": 264.55555555555554,
+        "tags": {
+          "org": "local",
+          "repo": "workspace",
+          "branch": "main",
+          "run_id": "ga-20260225T185928Z-seed1337"
+        }
+      },
+      {
+        "metric_name": "tool_calls_per_task",
+        "ts": "2026-02-25T18:59:28.204Z",
+        "value": 13.75,
+        "tags": {
+          "org": "local",
+          "repo": "workspace",
+          "branch": "main",
+          "run_id": "ga-20260225T185928Z-seed1337"
+        }
+      },
+      {
+        "metric_name": "diff_churn",
+        "ts": "2026-02-25T18:59:28.204Z",
+        "value": 67.52777777777777,
+        "tags": {
+          "org": "local",
+          "repo": "workspace",
+          "branch": "main",
+          "run_id": "ga-20260225T185928Z-seed1337"
+        }
+      },
+      {
+        "metric_name": "replay_determinism_rate",
+        "ts": "2026-02-25T18:59:28.204Z",
+        "value": 1,
+        "tags": {
+          "org": "local",
+          "repo": "workspace",
+          "branch": "main",
+          "run_id": "ga-20260225T185928Z-seed1337"
+        }
+      },
+      {
+        "metric_name": "grounded_edit_ratio",
+        "ts": "2026-02-25T18:59:28.204Z",
+        "value": 0.9859179959795435,
+        "tags": {
+          "org": "local",
+          "repo": "workspace",
+          "branch": "main",
+          "run_id": "ga-20260225T185928Z-seed1337"
+        }
+      },
+      {
+        "metric_name": "fix_loop_success_rate",
+        "ts": "2026-02-25T18:59:28.204Z",
+        "value": 0.9722222222222222,
+        "tags": {
+          "org": "local",
+          "repo": "workspace",
+          "branch": "main",
+          "run_id": "ga-20260225T185928Z-seed1337"
+        }
+      },
+      {
+        "metric_name": "artifact_completeness",
+        "ts": "2026-02-25T18:59:28.204Z",
+        "value": 1,
+        "tags": {
+          "org": "local",
+          "repo": "workspace",
+          "branch": "main",
+          "run_id": "ga-20260225T185928Z-seed1337"
+        }
+      },
+      {
+        "metric_name": "checkpoint_integrity",
+        "ts": "2026-02-25T18:59:28.204Z",
+        "value": 1,
+        "tags": {
+          "org": "local",
+          "repo": "workspace",
+          "branch": "main",
+          "run_id": "ga-20260225T185928Z-seed1337"
+        }
+      },
+      {
+        "metric_name": "non_destructive_rate",
+        "ts": "2026-02-25T18:59:28.204Z",
+        "value": 1,
+        "tags": {
+          "org": "local",
+          "repo": "workspace",
+          "branch": "main",
+          "run_id": "ga-20260225T185928Z-seed1337"
+        }
+      },
+      {
+        "metric_name": "pr_readiness_score",
+        "ts": "2026-02-25T18:59:28.204Z",
+        "value": 0.9755125776631757,
+        "tags": {
+          "org": "local",
+          "repo": "workspace",
+          "branch": "main",
+          "run_id": "ga-20260225T185928Z-seed1337"
+        }
+      },
+      {
+        "metric_name": "reviewer_mode_precision",
+        "ts": "2026-02-25T18:59:28.204Z",
+        "value": 0.9508319481094885,
+        "tags": {
+          "org": "local",
+          "repo": "workspace",
+          "branch": "main",
+          "run_id": "ga-20260225T185928Z-seed1337"
+        }
+      },
+      {
+        "metric_name": "decision_log_coverage",
+        "ts": "2026-02-25T18:59:28.204Z",
+        "value": 0.9609226325526833,
+        "tags": {
+          "org": "local",
+          "repo": "workspace",
+          "branch": "main",
+          "run_id": "ga-20260225T185928Z-seed1337"
+        }
+      },
+      {
+        "metric_name": "index_freshness_small_ms",
+        "ts": "2026-02-25T18:59:28.204Z",
+        "value": 149.94444444444446,
+        "tags": {
+          "org": "local",
+          "repo": "workspace",
+          "branch": "main",
+          "run_id": "ga-20260225T185928Z-seed1337"
+        }
+      },
+      {
+        "metric_name": "index_freshness_batch_ms",
+        "ts": "2026-02-25T18:59:28.204Z",
+        "value": 1571.7222222222222,
+        "tags": {
+          "org": "local",
+          "repo": "workspace",
+          "branch": "main",
+          "run_id": "ga-20260225T185928Z-seed1337"
+        }
+      },
+      {
+        "metric_name": "inline_suggestion_latency_p95",
+        "ts": "2026-02-25T18:59:28.204Z",
+        "value": 218,
+        "tags": {
+          "org": "local",
+          "repo": "workspace",
+          "branch": "main",
+          "run_id": "ga-20260225T185928Z-seed1337"
+        }
+      },
+      {
+        "metric_name": "human_intervention_rate",
+        "ts": "2026-02-25T18:59:28.204Z",
+        "value": 0.027777777777777776,
+        "tags": {
+          "org": "local",
+          "repo": "workspace",
+          "branch": "main",
+          "run_id": "ga-20260225T185928Z-seed1337"
+        }
+      },
+      {
+        "metric_name": "regression_budget_adherence",
+        "ts": "2026-02-25T18:59:28.204Z",
+        "value": 1,
+        "tags": {
+          "org": "local",
+          "repo": "workspace",
+          "branch": "main",
+          "run_id": "ga-20260225T185928Z-seed1337"
+        }
+      }
+    ]
+  },
+  "gate": {
+    "pass": true,
+    "failing": []
+  },
+  "alerts": []
+}
