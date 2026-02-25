@@ -32,6 +32,8 @@
 - Implemented provenance attestations in release workflow
 - Implemented release workflows for signed desktop artifacts
 - Implemented benchmark regression gate workflow: `.github/workflows/benchmark-gate.yml`
+- Implemented heavy validation workflow: `.github/workflows/heavy-test.yml` (manual + nightly)
+- Implemented benchmark publication workflow: `.github/workflows/benchmark-publish.yml` (manual + weekly)
 - Implemented docs site deploy workflow: `.github/workflows/docs-site.yml`
   - Performs a Pages availability pre-check and skips deploy (without failing CI) when Pages is not enabled yet.
 

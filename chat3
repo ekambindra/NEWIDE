@@ -1,0 +1,59 @@
+# chat3 - Atlas Meridian Continuity Log
+
+Last updated: 2026-02-25
+Project: Atlas Meridian (enterprise AI IDE)
+
+## Session Scope
+
+Deployment and testing hardening continuation after `chat2`, focused on CI automation and GA operational readiness evidence.
+
+## Completed Changes
+
+1. Added signed-release preflight secret validation:
+   - `scripts/check-release-signing-secrets.sh`
+   - npm scripts: `release:preflight:macos`, `release:preflight:windows`
+   - wired into `.github/workflows/desktop-release.yml` before release packaging.
+2. Added heavy validation CI workflow:
+   - `.github/workflows/heavy-test.yml`
+   - supports manual dispatch + nightly schedule + artifact upload retention.
+3. Added benchmark publication automation:
+   - script: `scripts/publish-benchmark-artifacts.mjs`
+   - workflow: `.github/workflows/benchmark-publish.yml`
+   - auto-updates `public-docs/benchmark-artifacts/latest-run.txt`
+   - auto-updates `public-docs/benchmarks.html` latest run + KPI snapshot sections.
+4. Published fresh benchmark artifacts locally:
+   - `public-docs/benchmark-artifacts/ga-20260225T183545Z-seed1337/`
+   - `public-docs/benchmark-artifacts/latest-run.txt` now points to that run.
+5. Added deployment/testing governance docs:
+   - `docs/governance/DEPLOY_AND_TEST_RUNBOOK.md`
+   - `docs/governance/GA_SIGNOFF_REFRESH_2026-02-25.md`
+   - updated references in `docs/INDEX.md`, `docs/governance/RELEASE_PIPELINE.md`, `docs/governance/PUBLIC_DEPLOYMENT_AND_RELEASE.md`, and `docs/governance/GA_SIGNOFF_CHECKLIST.md`.
+
+## Verification Status
+
+1. `npm run build --workspace @ide/benchmark` - pass
+2. `npm run benchmark:publish` - pass (`ga-20260225T183545Z-seed1337`)
+3. `npm run release:preflight:macos` (with simulated env values) - pass
+4. `npm run release:preflight:windows` (with simulated env values) - pass
+5. `npm run lint` - pass
+6. `npm run test` - pass
+7. `npm run build` - pass
+8. `./scripts/heavy-test.sh` - pass
+9. Heavy test report:
+   - `atlas-build-lab/reports/heavy-20260225133702.json`
+
+## Progress Snapshot
+
+1. Baseline platform features remain `170/170` (100%).
+2. Deploy/testing hardening tasks targeted this session: `4/4` completed (100%):
+   - release preflight gate,
+   - heavy-test CI workflow,
+   - benchmark publish workflow + docs update,
+   - GA evidence refresh docs.
+
+## Next Implementation Tasks
+
+1. Configure GitHub repository secrets/variables and run `desktop-release.yml` with `channel=stable`.
+2. Run `benchmark-publish.yml` in GitHub Actions and verify automated commit/update on `main`.
+3. Confirm `docs-site.yml` serves refreshed benchmark transparency content.
+4. Stamp release tag and update GA signoff record with live workflow run links.

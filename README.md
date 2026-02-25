@@ -27,6 +27,15 @@ npm install
 npm run dev:desktop
 ```
 
+## Deployment and Validation
+
+```bash
+npm run benchmark:publish
+npm run release:preflight:macos
+npm run release:preflight:windows
+./scripts/heavy-test.sh
+```
+
 ## Documentation
 
 - Full docs index: `docs/INDEX.md`

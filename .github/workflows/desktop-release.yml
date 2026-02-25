@@ -38,6 +38,8 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      - name: Preflight release signing secrets (macOS)
+        run: npm run release:preflight:macos
       - name: Install dependencies
         run: npm ci
       - name: Build and release macOS packages
@@ -68,6 +70,8 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      - name: Preflight release signing secrets (Windows)
+        run: npm run release:preflight:windows
       - name: Install dependencies
         run: npm ci
       - name: Build and release Windows packages

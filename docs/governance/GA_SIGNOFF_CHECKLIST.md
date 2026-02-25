@@ -8,6 +8,7 @@ This checklist defines M11 GA readiness signoff for Atlas Meridian.
    - `ci`
    - `desktop-build`
    - `benchmark-gate`
+   - `heavy-test`
    - `docs-site`
 2. No P0/P1 open regressions in core desktop runtime.
 3. Replay and checkpoint integrity tests pass at 100% artifact presence.
@@ -39,7 +40,7 @@ This checklist defines M11 GA readiness signoff for Atlas Meridian.
 
 1. `README.md` and docs portal reflect current GA version.
 2. Security and runbook documents reflect current controls.
-3. Benchmark transparency page updated with latest published report.
+3. Benchmark transparency page updated with latest published report from `benchmark-publish`.
 
 ## GA Approval Record
 

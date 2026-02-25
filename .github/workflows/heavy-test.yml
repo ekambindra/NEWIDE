@@ -1,0 +1,41 @@
+name: heavy-test
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 6 * * *"
+  push:
+    branches:
+      - main
+    paths:
+      - "scripts/heavy-test.sh"
+      - "scripts/full-validation.sh"
+      - "packages/benchmark/**"
+      - "apps/desktop/src/main/project-builder.ts"
+      - ".github/workflows/heavy-test.yml"
+
+jobs:
+  heavy-validation:
+    name: Heavy Validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Build benchmark package
+        run: npm run build --workspace @ide/benchmark
+      - name: Run heavy validation harness
+        run: ./scripts/heavy-test.sh
+      - name: Upload heavy-test artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: heavy-test-${{ github.run_id }}
+          retention-days: 14
+          path: |
+            atlas-build-lab/reports/*.json

@@ -7,6 +7,8 @@
 - Open-core publishing: `.github/workflows/open-core-publish.yml`
 - Enterprise extension distribution: `.github/workflows/enterprise-extension-distribute.yml`
 - Benchmark gate: `.github/workflows/benchmark-gate.yml`
+- Heavy validation: `.github/workflows/heavy-test.yml`
+- Benchmark publication: `.github/workflows/benchmark-publish.yml`
 - Public docs site deploy: `.github/workflows/docs-site.yml`
 
 ## Required Secrets
@@ -27,6 +29,15 @@
 ### Update Delivery
 
 - Repository variable: `ATLAS_UPDATE_BASE_URL`
+
+## Preflight Secret Validation
+
+`desktop-release.yml` now enforces explicit preflight checks before package/signing:
+
+- `npm run release:preflight:macos`
+- `npm run release:preflight:windows`
+
+These checks fail early with the exact list of missing secrets.
 
 ## Release Channels
 
