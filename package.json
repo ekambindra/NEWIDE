@@ -8,9 +8,10 @@
     "packages/*"
   ],
   "scripts": {
-    "build": "npm run --workspaces build",
-    "test": "npm run build --workspace @ide/shared && npm run --workspaces test",
-    "lint": "npm run --workspaces lint",
+    "build:deps": "npm run build --workspace @ide/shared && npm run build --workspace @ide/policy-engine && npm run build --workspace @ide/agent-runtime && npm run build --workspace @ide/indexer && npm run build --workspace @ide/benchmark",
+    "build": "npm run build:deps && npm run build --workspace @ide/control-plane && npm run build --workspace @ide/desktop",
+    "test": "npm run build:deps && npm run --workspaces test",
+    "lint": "npm run build:deps && npm run --workspaces lint",
     "dev:desktop": "npm run dev --workspace @ide/desktop",
     "dev:control-plane": "npm run dev --workspace @ide/control-plane",
     "dev": "npm run dev:desktop",
