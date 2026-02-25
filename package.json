@@ -16,8 +16,8 @@
     "dev:control-plane": "npm run dev --workspace @ide/control-plane",
     "dev": "npm run dev:desktop",
     "benchmark:publish": "node scripts/publish-benchmark-artifacts.mjs",
-    "release:preflight:macos": "scripts/check-release-signing-secrets.sh macos",
-    "release:preflight:windows": "scripts/check-release-signing-secrets.sh windows"
+    "release:preflight:macos": "bash scripts/check-release-signing-secrets.sh macos",
+    "release:preflight:windows": "bash scripts/check-release-signing-secrets.sh windows"
   },
   "devDependencies": {
     "@types/node": "^22.13.10",
