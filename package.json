@@ -9,7 +9,7 @@
   ],
   "scripts": {
     "build": "npm run --workspaces build",
-    "test": "npm run --workspaces test",
+    "test": "npm run build --workspace @ide/shared && npm run --workspaces test",
     "lint": "npm run --workspaces lint",
     "dev:desktop": "npm run dev --workspace @ide/desktop",
     "dev:control-plane": "npm run dev --workspace @ide/control-plane",

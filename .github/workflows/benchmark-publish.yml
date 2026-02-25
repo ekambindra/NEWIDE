@@ -29,6 +29,8 @@ jobs:
           cache: npm
       - name: Install dependencies
         run: npm ci
+      - name: Build shared package
+        run: npm run build --workspace @ide/shared
       - name: Build benchmark package
         run: npm run build --workspace @ide/benchmark
       - name: Publish benchmark artifacts and update docs
