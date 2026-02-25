@@ -41,3 +41,13 @@ This record captures deployment/testing hardening completed on 2026-02-25 and th
 3. Run `benchmark-publish.yml` (workflow_dispatch) and verify commit/update on `main`.
 4. Confirm `docs-site.yml` deployment picks up refreshed benchmark transparency page.
 5. Stamp or update GA release tag after checklist approval.
+
+## Status Update (Completed)
+
+1. `benchmark-publish.yml` completed successfully: run `22411405089`.
+2. `desktop-release.yml` stable completed successfully after workflow hardening: run `22412163336`.
+3. Validation workflows green on release commit `e51066cbf8c72a9b606a513df20fa9e20282164a`:
+   - `ci`: `22411721453`
+   - `desktop-build`: `22411721451`
+   - `benchmark-gate`: `22411721456`
+   - `docs-site`: `22411721445`
