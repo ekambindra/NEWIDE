@@ -1,0 +1,84 @@
+# chat4 - Atlas Meridian Continuity Log
+
+Last updated: 2026-02-25
+Project: Atlas Meridian (enterprise AI IDE)
+
+## Session Scope
+
+Completion of remaining deploy/testing work, including workflow hardening, CI failure remediation, benchmark publication, signed stable release validation, and release tag stamping.
+
+## Completed Changes
+
+1. Added/validated deployment workflows and automation:
+   - `.github/workflows/heavy-test.yml`
+   - `.github/workflows/benchmark-publish.yml`
+   - hardened `.github/workflows/desktop-release.yml`
+2. Added release preflight secret gate script and made it cross-platform:
+   - `scripts/check-release-signing-secrets.sh`
+   - supports env alias resolution (`CSC_*`, `WIN_*`, `WINDOWS_*`, `MACOS_*`)
+   - macOS notarization credentials now optional with explicit warning.
+3. Added benchmark publication automation script:
+   - `scripts/publish-benchmark-artifacts.mjs`
+   - updates `public-docs/benchmark-artifacts/latest-run.txt`
+   - updates marked sections in `public-docs/benchmarks.html`.
+4. Fixed CI deterministic dependency ordering failures by enforcing shared/package dependency builds before workspace lint/test/build:
+   - root `package.json` scripts (`build:deps`, ordered `build`, `test`, `lint`).
+5. Fixed heavy-test portability bug:
+   - removed hardcoded local absolute path in `scripts/heavy-test.sh`
+   - dynamic import now resolves from runtime workspace root.
+6. Added deploy/release governance documentation updates:
+   - `docs/governance/DEPLOY_AND_TEST_RUNBOOK.md`
+   - `docs/governance/GA_SIGNOFF_REFRESH_2026-02-25.md` (updated with final run IDs)
+   - `docs/governance/GA_SIGNOFF_RECORD_2026-02-25_v0.1.1.md`
+   - `docs/governance/RELEASE_NOTES_v0.1.1.md`
+   - `docs/INDEX.md` links updated.
+7. Published benchmark artifacts (workflow and docs):
+   - latest run id: `ga-20260225T185928Z-seed1337`.
+8. Stamped and pushed release tag:
+   - `v0.1.1` (points to commit `e51066cbf8c72a9b606a513df20fa9e20282164a`).
+
+## Key Run Evidence (GitHub Actions)
+
+### Stable validation set (commit `e51066c...`)
+
+1. `ci` success: run `22411721453`
+2. `desktop-build` success: run `22411721451`
+3. `benchmark-gate` success: run `22411721456`
+4. `docs-site` success: run `22411721445`
+5. `desktop-release` success (`workflow_dispatch`, channel=stable): run `22412163336`
+
+### Heavy and benchmark publish validation
+
+1. `heavy-test` success: run `22411266585`
+2. `benchmark-publish` success: run `22411405089`
+
+### Tag validation
+
+1. `desktop-release` success (`push` from tag `v0.1.1`): run `22413281525`
+
+## Verification Status (Local)
+
+1. `npm run lint` - pass
+2. `npm run test` - pass
+3. `npm run build` - pass
+4. `./scripts/heavy-test.sh` - pass
+5. `npm run benchmark:publish` - pass
+6. `npm run release:preflight:macos` - pass
+7. `npm run release:preflight:windows` - pass
+
+## Progress Snapshot
+
+1. Baseline feature tracker remains `170/170` (100%).
+2. Deploy/testing completion for this session: `6/6` (100%):
+   - CI failure remediation
+   - heavy-test workflow stabilization
+   - benchmark publication workflow run
+   - stable desktop release success
+   - GA signoff evidence refresh
+   - release tag stamping
+
+## Next Implementation Tasks
+
+1. Optional: enforce notarization-required mode for GA if Apple credentials are mandatory in your release policy.
+2. Optional: run `benchmark-publish.yml` on a recurring cadence and keep docs artifact history pruned.
+3. Optional: add automated release-note/changelog generation step tied to tag pushes.
