@@ -42,6 +42,8 @@ jobs:
         run: npm run release:preflight:macos
       - name: Install dependencies
         run: npm ci
+      - name: Build shared package dependencies
+        run: npm run build:deps
       - name: Build and release macOS packages
         run: npm run release:desktop:mac --workspace @ide/desktop
       - name: Upload macOS release artifacts
@@ -74,6 +76,8 @@ jobs:
         run: npm run release:preflight:windows
       - name: Install dependencies
         run: npm ci
+      - name: Build shared package dependencies
+        run: npm run build:deps
       - name: Build and release Windows packages
         run: npm run release:desktop:win --workspace @ide/desktop
       - name: Upload Windows release artifacts
