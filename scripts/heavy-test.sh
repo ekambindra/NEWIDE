@@ -47,12 +47,18 @@ done
 echo "[heavy:4/5] Project builder stress (generate + validate 6 projects)"
 rm -rf "$STRESS_DIR"
 mkdir -p "$STRESS_DIR"
-node --input-type=module <<'EOF'
+ATLAS_WORKSPACE_ROOT="$ROOT_DIR" node --input-type=module <<'EOF'
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
-import { buildProjectTemplate } from "/Users/ekambindra/NEWIDE/apps/desktop/dist/main/project-builder.js";
+import { pathToFileURL } from "node:url";
 
-const workspaceRoot = "/Users/ekambindra/NEWIDE";
+const workspaceRoot = process.env.ATLAS_WORKSPACE_ROOT ?? "";
+if (!workspaceRoot) {
+  throw new Error("ATLAS_WORKSPACE_ROOT is required");
+}
+
+const projectBuilderModulePath = join(workspaceRoot, "apps", "desktop", "dist", "main", "project-builder.js");
+const { buildProjectTemplate } = await import(pathToFileURL(projectBuilderModulePath).href);
 const checkpointRoot = join(workspaceRoot, ".atlas-checkpoints");
 await mkdir(checkpointRoot, { recursive: true });
 
