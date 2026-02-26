@@ -57,6 +57,7 @@ type MultiAgentRunOutcome = {
 type PanelTab = "agent" | "plan" | "diff" | "checkpoints";
 type BottomTab = "terminal" | "tests" | "logs";
 type LeftTab = "files" | "search";
+type CodexRightTab = "changes" | "files" | "panels";
 
 type DiffChunk = {
   id: string;
@@ -935,6 +936,7 @@ export function App() {
   const [agentActivityFeed, setAgentActivityFeed] = useState<AgentActivityItem[]>([]);
   const [uiShellMode, setUiShellMode] = useState<"codex" | "legacy">("codex");
   const [selectedThreadId, setSelectedThreadId] = useState<string | null>(null);
+  const [codexRightTab, setCodexRightTab] = useState<CodexRightTab>("changes");
   const [changeFilterText, setChangeFilterText] = useState("");
   const [explorerFilterText, setExplorerFilterText] = useState("");
   const [advancedControls, setAdvancedControls] = useState(false);
@@ -1013,6 +1015,7 @@ export function App() {
   const workflowInputRef = useRef<HTMLInputElement | null>(null);
   const workflowBlurTimerRef = useRef<number | null>(null);
   const canceledFreeformRunsRef = useRef<Set<string>>(new Set());
+  const lastWorkspaceWatchLogAtRef = useRef(0);
   const dragRef = useRef<null | "left" | "right" | "bottom">(null);
   const sessionHydratedRef = useRef(false);
 
@@ -1189,7 +1192,71 @@ export function App() {
     () => threadNavItems.find((item) => item.id === selectedThreadId) ?? threadNavItems[0] ?? null,
     [threadNavItems, selectedThreadId]
   );
-  const timelineLines = useMemo(() => logs.slice(0, 40), [logs]);
+  const narrativeLogLines = useMemo(() => {
+    const importantPattern =
+      /^\[(workflow|agent|builder|refactor|repair|pipeline|diff|checkpoint|reviewer|memory|decision|ownership|release|benchmark|terminal|pty|security|audit|auth|control-plane)\]/i;
+    return logs.filter((line) => importantPattern.test(line)).slice(0, 40);
+  }, [logs]);
+  const codexConversationTurns = useMemo(
+    () =>
+      workflowHistory.slice(-24).map((entry, index) => ({
+        id: `turn-${index}-${entry.slice(0, 14)}`,
+        role: "user" as const,
+        text: entry
+      })),
+    [workflowHistory]
+  );
+  const codexAssistantTurns = useMemo(
+    () =>
+      narrativeLogLines
+        .slice(0, 18)
+        .reverse()
+        .map((entry, index) => ({
+          id: `assistant-${index}-${entry.slice(0, 14)}`,
+          role: "assistant" as const,
+          text: entry
+        })),
+    [narrativeLogLines]
+  );
+  const activeBotPhase = useMemo(() => {
+    if (agentActivityFeed.length > 0) {
+      return agentActivityFeed[0]?.stage ?? "idle";
+    }
+    return runStateDetail;
+  }, [agentActivityFeed, runStateDetail]);
+  const progressChecklist = useMemo(
+    () => [
+      { label: "Workspace", done: Boolean(workspaceRoot), state: workspaceRoot ? "ready" : "pending" },
+      {
+        label: "Planning",
+        done: agentActivityFeed.some((entry) => /plan/i.test(entry.stage)),
+        state: /plan/i.test(activeBotPhase) ? "active" : "waiting"
+      },
+      {
+        label: "Implementation",
+        done: tabs.some((tab) => tab.dirty) || patchQueue.length > 0,
+        state: /implement|patch|edit|refactor|builder/i.test(activeBotPhase) ? "active" : "waiting"
+      },
+      {
+        label: "Validation",
+        done: testSummaries.length > 0 || pipelineResult !== null,
+        state: /test|pipeline|validate|repair/i.test(activeBotPhase) ? "active" : "waiting"
+      }
+    ],
+    [workspaceRoot, agentActivityFeed, activeBotPhase, tabs, patchQueue.length, testSummaries.length, pipelineResult]
+  );
+  const activePreviewLines = useMemo(() => {
+    if (!active || active.binary) {
+      return [] as Array<{ line: number; text: string; changed: boolean }>;
+    }
+    const current = active.content.split("\n").slice(0, 220);
+    const original = active.originalContent.split("\n");
+    return current.map((text, index) => ({
+      line: index + 1,
+      text,
+      changed: original[index] !== text
+    }));
+  }, [active]);
   const changeCards = useMemo(() => {
     const map = new Map<string, { file: string; touches: number; additions: number; deletions: number }>();
     patchQueue.forEach((item) => {
@@ -1463,7 +1530,16 @@ export function App() {
     void window.ide.startWatch(workspaceRoot);
     const unsubscribe = window.ide.onWorkspaceChanged(async () => {
       await refreshTree(workspaceRoot);
-      setLogs((prev) => [`[watch] workspace changed ${new Date().toLocaleTimeString()}`, ...prev].slice(0, 200));
+      const now = Date.now();
+      if (now - lastWorkspaceWatchLogAtRef.current >= 8000) {
+        lastWorkspaceWatchLogAtRef.current = now;
+        setLogs((prev) => {
+          if (prev[0] === "[watch] workspace changed") {
+            return prev;
+          }
+          return ["[watch] workspace changed", ...prev].slice(0, 200);
+        });
+      }
     });
 
     return () => {
@@ -3167,11 +3243,14 @@ export function App() {
         <a className="skip-link" href="#codex-main">Skip to main content</a>
         <div className="sr-only" aria-live="polite" aria-atomic="true">{accessibilityStatus}</div>
         <aside className="codex-sidebar">
-          <div className="codex-brand">
-            <span className="logo-dot" />
-            <strong>Atlas Meridian</strong>
+          <div className="codex-brand codex-brand-v2">
+            <span className="logo-dot" aria-hidden="true" />
+            <div>
+              <strong>Atlas Meridian</strong>
+              <span>Agentic IDE</span>
+            </div>
           </div>
-          <nav className="codex-nav">
+          <nav className="codex-nav codex-nav-v2">
             <button
               onClick={() => {
                 setWorkflowInput("");
@@ -3181,8 +3260,25 @@ export function App() {
             >
               New thread
             </button>
-            <button onClick={() => setPanelTab("plan")}>Automations</button>
-            <button onClick={() => setPanelTab("agent")}>Skills</button>
+            <button onClick={() => { void openWorkspace(); }}>Open workspace</button>
+            <button onClick={() => { setCodexRightTab("panels"); setPanelTab("plan"); setShowRightPane(true); }}>
+              Automations
+            </button>
+            <button onClick={() => { setCodexRightTab("panels"); setPanelTab("agent"); setShowRightPane(true); }}>
+              Skills
+            </button>
+            <button onClick={() => { setCodexRightTab("panels"); setPanelTab("diff"); setShowRightPane(true); }}>
+              Diff review
+            </button>
+            <button
+              onClick={() => {
+                setCodexRightTab("panels");
+                setPanelTab("checkpoints");
+                setShowRightPane(true);
+              }}
+            >
+              Checkpoints
+            </button>
           </nav>
           <div className="codex-thread-header">
             <span>Threads</span>
@@ -3203,7 +3299,7 @@ export function App() {
                 onClick={() => setSelectedThreadId(item.id)}
               >
                 <strong>{item.title}</strong>
-                <span>{item.subtitle}</span>
+                <span>{item.subtitle} · {item.turnCount}</span>
               </button>
             ))}
           </div>
@@ -3220,14 +3316,42 @@ export function App() {
             </div>
             <div className="codex-main-actions">
               <span className={`run-badge ${runState}`}>{runState.toUpperCase()}</span>
-              <button onClick={openWorkspace}>Open</button>
+              <button onClick={() => { void openWorkspace(); }}>Open</button>
               <button
                 onClick={() => {
+                  setCodexRightTab("changes");
                   setPanelTab("diff");
                   setShowRightPane(true);
                 }}
               >
                 Changes
+              </button>
+              <button
+                className={codexRightTab === "files" ? "active" : ""}
+                onClick={() => {
+                  setCodexRightTab("files");
+                  setShowRightPane(true);
+                }}
+              >
+                Files
+              </button>
+              <button
+                className={codexRightTab === "panels" && panelTab === "agent" ? "active" : ""}
+                onClick={() => {
+                  setCodexRightTab("panels");
+                  setPanelTab("agent");
+                  setShowRightPane(true);
+                }}
+              >
+                Agent
+              </button>
+              <button
+                onClick={() => {
+                  setBottomTab("tests");
+                  setShowBottomPane(true);
+                }}
+              >
+                Tests
               </button>
               <button
                 onClick={() => {
@@ -3253,28 +3377,102 @@ export function App() {
               <code>workspace: {workspaceRoot ?? "none"}</code>
               <code>turns: {workflowHistory.length}</code>
               <code>changes: {filteredChangeCards.length} files</code>
+              <code>active: {active?.path ?? "none"}</code>
             </div>
             <div className="codex-turn-card">
-              <strong>Recent execution output</strong>
-              {timelineLines.length > 0 ? (
-                timelineLines.map((line, index) => (
-                  <code key={`timeline-${index}-${line.slice(0, 14)}`}>{line}</code>
-                ))
-              ) : (
-                <p className="empty">No turn output yet. Send a request below.</p>
-              )}
-            </div>
-            {agentActivityFeed.length > 0 ? (
-              <div className="codex-turn-card">
-                <strong>Agent activity</strong>
-                {agentActivityFeed.slice(0, 10).map((entry) => (
-                  <code key={entry.id}>[{entry.ts}] {entry.stage}: {entry.detail}</code>
+              <strong>Bot progress</strong>
+              <code>phase: {activeBotPhase}</code>
+              <code>run: {runState}</code>
+              <code>pending approval: {pendingApprovalCommand ? "yes" : "no"}</code>
+              <div className="codex-progress-list">
+                {progressChecklist.map((item) => (
+                  <div key={`progress-${item.label}`} className={`codex-progress-item ${item.done ? "done" : ""}`}>
+                    <span>{item.label}</span>
+                    <code>{item.done ? "done" : item.state}</code>
+                  </div>
                 ))}
               </div>
-            ) : null}
+            </div>
+            <div className="codex-chat-stream">
+              {codexConversationTurns.length === 0 ? (
+                <article className="codex-message assistant">
+                  <header>Atlas</header>
+                  <p>Open a workspace and describe what you want built. Atlas will plan, patch, run, and validate.</p>
+                </article>
+              ) : (
+                codexConversationTurns.map((turn) => (
+                  <article key={turn.id} className="codex-message user">
+                    <header>You</header>
+                    <p>{turn.text}</p>
+                  </article>
+                ))
+              )}
+            </div>
+            <div className="codex-turn-card">
+              <strong>AI response stream</strong>
+              {codexAssistantTurns.length > 0 ? (
+                codexAssistantTurns.slice(-12).map((turn) => <code key={turn.id}>{turn.text}</code>)
+              ) : (
+                <p className="empty">No AI output yet. Submit a request and stream updates here.</p>
+              )}
+            </div>
+            <div className="codex-turn-card">
+              <strong>Code written in this run</strong>
+              {changeCards.length > 0 ? (
+                <div className="codex-change-grid">
+                  {changeCards.slice(0, 24).map((item) => (
+                    <button
+                      key={`main-change-${item.file}`}
+                      className="codex-change-item"
+                      onClick={() => { void openFile(item.file); }}
+                    >
+                      <strong>{item.file}</strong>
+                      <span>touches {item.touches}</span>
+                      <code>+{item.additions} -{item.deletions}</code>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <p className="empty">No tracked file edits yet.</p>
+              )}
+              {agentActivityFeed.length > 0 ? (
+                <div className="codex-inline-log">
+                  {agentActivityFeed.slice(0, 8).map((entry) => (
+                    <code key={entry.id}>[{entry.ts}] {entry.stage}: {entry.detail}</code>
+                  ))}
+                </div>
+              ) : null}
+            </div>
           </section>
 
           <footer className="codex-composer-dock">
+            <div className="codex-chip-row">
+              {orderedQuickChips.slice(0, 6).map((chip) => {
+                const pinned = quickChipFavorites.includes(chip.command);
+                return (
+                  <div key={`codex-chip-${chip.command}`} className="quick-chip">
+                    <button
+                      type="button"
+                      className="quick-chip-run"
+                      onClick={() => {
+                        setWorkflowInput(chip.command);
+                        void runWorkflowRequest(chip.command);
+                      }}
+                    >
+                      {chip.label}
+                    </button>
+                    <button
+                      type="button"
+                      className={`quick-chip-pin ${pinned ? "active" : ""}`}
+                      onClick={() => toggleQuickChipFavorite(chip.command)}
+                      aria-label={pinned ? `Unpin ${chip.label}` : `Pin ${chip.label}`}
+                    >
+                      {pinned ? "★" : "☆"}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
             <form
               className="workflow-composer codex-compose-form"
               onSubmit={(event) => {
@@ -3348,6 +3546,7 @@ export function App() {
             <div className="codex-composer-meta">
               <span>Model: GPT-5.3-Codex</span>
               <span>Effort: High</span>
+              <span>Bottom: {bottomTab}</span>
               <button onClick={() => setCommandPaletteOpen(true)}>Palette</button>
               <button onClick={() => setUiShellMode("legacy")}>Legacy</button>
             </div>
@@ -3356,46 +3555,150 @@ export function App() {
 
         <aside className="codex-right-pane">
           <div className="codex-right-header">
-            <strong>Last turn changes</strong>
-            <span>{filteredChangeCards.length} files</span>
+            <strong>Workspace context</strong>
+            <span>{active?.path ?? "No file selected"}</span>
           </div>
-          <div className="codex-right-section">
-            <input
-              value={changeFilterText}
-              onChange={(event) => setChangeFilterText(event.target.value)}
-              placeholder="Filter changed files..."
-              aria-label="Filter changed files"
-            />
-            <div className="codex-change-list">
-              {filteredChangeCards.map((item) => (
-                <button key={`change-${item.file}`} onClick={() => { void openFile(item.file); }}>
-                  <strong>{item.file}</strong>
-                  <span>touches {item.touches}</span>
-                  <code>+{item.additions} -{item.deletions}</code>
-                </button>
-              ))}
-              {filteredChangeCards.length === 0 ? <p className="empty">No tracked changes yet.</p> : null}
+          <div className="codex-right-tabs">
+            <button
+              className={codexRightTab === "changes" ? "active" : ""}
+              onClick={() => setCodexRightTab("changes")}
+            >
+              Last turn changes
+            </button>
+            <button
+              className={codexRightTab === "files" ? "active" : ""}
+              onClick={() => setCodexRightTab("files")}
+            >
+              Files
+            </button>
+            <button
+              className={codexRightTab === "panels" ? "active" : ""}
+              onClick={() => setCodexRightTab("panels")}
+            >
+              Panels
+            </button>
+          </div>
+          {codexRightTab === "changes" ? (
+            <div className="codex-right-section">
+              <input
+                value={changeFilterText}
+                onChange={(event) => setChangeFilterText(event.target.value)}
+                placeholder="Filter changed files..."
+                aria-label="Filter changed files"
+              />
+              <div className="codex-change-list">
+                {filteredChangeCards.map((item) => (
+                  <button key={`change-${item.file}`} onClick={() => { void openFile(item.file); }}>
+                    <strong>{item.file}</strong>
+                    <span>touches {item.touches}</span>
+                    <code>+{item.additions} -{item.deletions}</code>
+                  </button>
+                ))}
+                {filteredChangeCards.length === 0 ? <p className="empty">No tracked changes yet.</p> : null}
+              </div>
             </div>
-          </div>
-          <div className="codex-right-section">
+          ) : null}
+          {codexRightTab === "files" ? (
+            <div className="codex-right-section">
+              <div className="codex-right-subhead">
+                <strong>Workspace files</strong>
+                <span>{filteredExplorerFiles.length}</span>
+              </div>
+              <input
+                value={explorerFilterText}
+                onChange={(event) => setExplorerFilterText(event.target.value)}
+                placeholder="Filter files..."
+                aria-label="Filter workspace files"
+              />
+              <div className="codex-file-list">
+                {explorerFilterText.trim() ? (
+                  filteredExplorerFiles.slice(0, 240).map((file) => (
+                    <button key={`file-${file}`} onClick={() => { void openFile(file); }}>
+                      {file}
+                    </button>
+                  ))
+                ) : (
+                  tree.length > 0 ? renderTree(tree, (path) => { void openFile(path); }) : <p className="empty">No files in workspace.</p>
+                )}
+                {!explorerFilterText.trim() && tree.length === 0 ? <p className="empty">Open a workspace to load files.</p> : null}
+              </div>
+            </div>
+          ) : null}
+          {codexRightTab === "panels" ? (
+            <div className="codex-right-section">
+              <div className="codex-inline-tabs">
+                {panelTabs.map((tab) => (
+                  <button
+                    key={`codex-panel-${tab}`}
+                    className={panelTab === tab ? "active" : ""}
+                    onClick={() => {
+                      setPanelTab(tab);
+                      setShowRightPane(true);
+                    }}
+                  >
+                    {tab}
+                  </button>
+                ))}
+              </div>
+              <div className="codex-panel-card">
+                {panelTab === "agent" ? (
+                  <>
+                    <code>multi-agent: {multiAgentRunning ? "running" : "idle"}</code>
+                    <code>freeform: {freeformRunStatus}</code>
+                    {agentActivityFeed.slice(0, 6).map((entry) => (
+                      <code key={`agent-${entry.id}`}>[{entry.ts}] {entry.stage}: {entry.detail}</code>
+                    ))}
+                    {agentActivityFeed.length === 0 ? <p className="empty">No agent events yet.</p> : null}
+                  </>
+                ) : null}
+                {panelTab === "plan" ? (
+                  <>
+                    <code>pending approval: {pendingApprovalCommand ?? "none"}</code>
+                    <code>reason: {pendingApprovalReason ?? "none"}</code>
+                    <code>decisions logged: {decisionLogs.length}</code>
+                    <code>audit events: {auditEvents.length}</code>
+                  </>
+                ) : null}
+                {panelTab === "diff" ? (
+                  <>
+                    <code>chunks: {diffChurn.changedChunks}</code>
+                    <code>pending: {diffChurn.pendingChunks}</code>
+                    <code>accepted: {diffChurn.acceptedChunks}</code>
+                    <code>rejected: {diffChurn.rejectedChunks}</code>
+                    <code>+{diffChurn.additions} -{diffChurn.deletions}</code>
+                    <code>sensitive: {sensitivePathSignals.join(", ") || "none"}</code>
+                  </>
+                ) : null}
+                {panelTab === "checkpoints" ? (
+                  <>
+                    <code>checkpoints: {checkpoints.length}</code>
+                    <code>diff snapshots: {diffCheckpoints.length}</code>
+                    {checkpoints.slice(0, 4).map((item) => (
+                      <code key={`checkpoint-${item.path}`}>{item.path}</code>
+                    ))}
+                    {checkpoints.length === 0 ? <p className="empty">No checkpoints yet.</p> : null}
+                  </>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
+          <div className="codex-right-section codex-code-preview-section">
             <div className="codex-right-subhead">
-              <strong>Workspace files</strong>
-              <span>{filteredExplorerFiles.length}</span>
+              <strong>{active?.path ?? "No file selected"}</strong>
+              <span>{active?.binary ? "Binary" : "Preview"}</span>
             </div>
-            <input
-              value={explorerFilterText}
-              onChange={(event) => setExplorerFilterText(event.target.value)}
-              placeholder="Filter files..."
-              aria-label="Filter workspace files"
-            />
-            <div className="codex-file-list">
-              {filteredExplorerFiles.slice(0, 180).map((file) => (
-                <button key={`file-${file}`} onClick={() => { void openFile(file); }}>
-                  {file}
-                </button>
-              ))}
-              {filteredExplorerFiles.length === 0 ? <p className="empty">No files in workspace.</p> : null}
-            </div>
+            {active && !active.binary ? (
+              <div className="codex-code-preview">
+                {activePreviewLines.slice(0, 180).map((line) => (
+                  <div key={`line-${line.line}`} className={`code-line ${line.changed ? "changed" : ""}`}>
+                    <span>{line.line}</span>
+                    <code>{line.text || " "}</code>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="empty">Open a text file to view code preview.</p>
+            )}
           </div>
         </aside>
       </div>
