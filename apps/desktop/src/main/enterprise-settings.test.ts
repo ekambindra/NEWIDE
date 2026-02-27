@@ -15,6 +15,7 @@ describe("enterprise settings manager", () => {
     expect(settings.telemetry.enabled).toBe(false);
     expect(settings.telemetry.privacyMode).toBe(false);
     expect(settings.controlPlane.mode).toBe("disabled");
+    expect(settings.security.mode).toBe("balanced");
   });
 
   it("enforces consent and privacy mode for telemetry", async () => {
@@ -61,5 +62,17 @@ describe("enterprise settings manager", () => {
 
     const resolved = await manager.resolveControlPlaneBaseUrl();
     expect(resolved).toBe("http://localhost:4100");
+  });
+
+  it("persists strict security mode", async () => {
+    const root = await mkdtemp(join(tmpdir(), "atlas-enterprise-security-mode-"));
+    const manager = createEnterpriseSettingsManager(root);
+    await manager.initialize();
+
+    const updated = await manager.updateSecurityMode("strict");
+    expect(updated.security.mode).toBe("strict");
+
+    const loaded = await manager.getSettings();
+    expect(loaded.security.mode).toBe("strict");
   });
 });

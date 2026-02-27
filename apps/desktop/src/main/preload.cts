@@ -260,6 +260,7 @@ type AuthSession = {
 
 type TelemetryConsent = "unknown" | "granted" | "denied";
 type ControlPlaneMode = "disabled" | "managed" | "self_hosted";
+type SecurityMode = "balanced" | "strict";
 
 type EnterpriseSettings = {
   version: 1;
@@ -279,6 +280,10 @@ type EnterpriseSettings = {
     apiToken: string | null;
     orgId: string | null;
     workspaceId: string | null;
+    lastUpdated: string;
+  };
+  security: {
+    mode: SecurityMode;
     lastUpdated: string;
   };
 };
@@ -679,6 +684,8 @@ const api = {
     workspaceId?: string | null;
   }): Promise<EnterpriseSettings> =>
     ipcRenderer.invoke("enterprise:control-plane:update", payload),
+  updateSecurityMode: (payload: { mode: SecurityMode }): Promise<EnterpriseSettings> =>
+    ipcRenderer.invoke("enterprise:security-mode:update", payload),
   controlPlaneHealthCheck: (): Promise<ControlPlaneHealthResult> =>
     ipcRenderer.invoke("enterprise:control-plane:health"),
   pushControlPlaneMetrics: (

@@ -3,6 +3,7 @@ import { dirname, join } from "node:path";
 
 export type TelemetryConsent = "unknown" | "granted" | "denied";
 export type ControlPlaneMode = "disabled" | "managed" | "self_hosted";
+export type SecurityMode = "balanced" | "strict";
 
 export type TelemetrySettings = {
   consent: TelemetryConsent;
@@ -28,6 +29,10 @@ export type EnterpriseSettings = {
   updatedAt: string;
   telemetry: TelemetrySettings;
   controlPlane: ControlPlaneSettings;
+  security: {
+    mode: SecurityMode;
+    lastUpdated: string;
+  };
 };
 
 export type TelemetryDecision = {
@@ -50,6 +55,7 @@ export type EnterpriseSettingsManager = {
   updateTelemetry: (input: UpdateTelemetryInput) => Promise<EnterpriseSettings>;
   setPrivacyMode: (enabled: boolean) => Promise<EnterpriseSettings>;
   updateControlPlane: (input: UpdateControlPlaneInput) => Promise<EnterpriseSettings>;
+  updateSecurityMode: (mode: SecurityMode) => Promise<EnterpriseSettings>;
   canSendTelemetry: () => Promise<TelemetryDecision>;
   resolveControlPlaneBaseUrl: () => Promise<string | null>;
 };
@@ -84,6 +90,10 @@ function defaultSettings(): EnterpriseSettings {
       apiToken: null,
       orgId: null,
       workspaceId: null,
+      lastUpdated: now
+    },
+    security: {
+      mode: "balanced",
       lastUpdated: now
     }
   };
@@ -179,6 +189,10 @@ export function createEnterpriseSettingsManager(root: string): EnterpriseSetting
       controlPlane: {
         ...seeded.controlPlane,
         ...(fromDisk.controlPlane ?? {})
+      },
+      security: {
+        ...seeded.security,
+        ...(fromDisk.security ?? {})
       }
     };
 
@@ -187,6 +201,9 @@ export function createEnterpriseSettingsManager(root: string): EnterpriseSetting
       merged.telemetry.enabled &&
       merged.telemetry.consent === "granted" &&
       !merged.telemetry.privacyMode;
+    if (merged.security.mode !== "balanced" && merged.security.mode !== "strict") {
+      merged.security.mode = "balanced";
+    }
 
     cached = cloneSettings(merged);
     return cloneSettings(merged);
@@ -283,6 +300,22 @@ export function createEnterpriseSettingsManager(root: string): EnterpriseSetting
         }
       };
 
+      return persist(next);
+    },
+
+    async updateSecurityMode(mode: SecurityMode): Promise<EnterpriseSettings> {
+      if (mode !== "balanced" && mode !== "strict") {
+        throw new Error("invalid security mode");
+      }
+      const current = await load();
+      const now = nowIso();
+      const next: EnterpriseSettings = {
+        ...current,
+        security: {
+          mode,
+          lastUpdated: now
+        }
+      };
       return persist(next);
     },
 

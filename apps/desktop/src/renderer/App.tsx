@@ -398,6 +398,7 @@ type AuthSession = {
 
 type TelemetryConsent = "unknown" | "granted" | "denied";
 type ControlPlaneMode = "disabled" | "managed" | "self_hosted";
+type SecurityMode = "balanced" | "strict";
 
 type EnterpriseSettings = {
   version: 1;
@@ -417,6 +418,10 @@ type EnterpriseSettings = {
     apiToken: string | null;
     orgId: string | null;
     workspaceId: string | null;
+    lastUpdated: string;
+  };
+  security: {
+    mode: SecurityMode;
     lastUpdated: string;
   };
 };
@@ -989,6 +994,7 @@ export function App() {
     consent: "unknown" as TelemetryConsent,
     telemetryEnabled: false,
     privacyMode: false,
+    securityMode: "balanced" as SecurityMode,
     mode: "disabled" as ControlPlaneMode,
     baseUrl: "https://control.atlasmeridian.dev",
     requireTls: true,
@@ -1428,6 +1434,7 @@ export function App() {
       consent: settings.telemetry.consent,
       telemetryEnabled: settings.telemetry.enabled,
       privacyMode: settings.telemetry.privacyMode,
+      securityMode: settings.security.mode,
       mode: settings.controlPlane.mode,
       baseUrl: settings.controlPlane.baseUrl,
       requireTls: settings.controlPlane.requireTls,
@@ -2494,9 +2501,12 @@ export function App() {
         orgId: enterpriseDraft.orgId.trim() || null,
         workspaceId: enterpriseDraft.workspaceId.trim() || null
       });
+      await window.ide.updateSecurityMode({
+        mode: enterpriseDraft.securityMode
+      });
       await Promise.all([refreshEnterpriseSettings(), refreshAudit()]);
       setLogs((prev) => [
-        `[enterprise] settings saved mode=${enterpriseDraft.mode} consent=${enterpriseDraft.consent} privacy=${enterpriseDraft.privacyMode}`,
+        `[enterprise] settings saved mode=${enterpriseDraft.mode} security=${enterpriseDraft.securityMode} consent=${enterpriseDraft.consent} privacy=${enterpriseDraft.privacyMode}`,
         ...prev
       ]);
     } catch (error) {
@@ -4470,6 +4480,21 @@ export function App() {
                     />
                     Allow localhost http
                   </label>
+                  <label style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                    Security mode
+                    <select
+                      value={enterpriseDraft.securityMode}
+                      onChange={(event) =>
+                        setEnterpriseDraft((current) => ({
+                          ...current,
+                          securityMode: event.target.value as SecurityMode
+                        }))
+                      }
+                    >
+                      <option value="balanced">balanced</option>
+                      <option value="strict">strict</option>
+                    </select>
+                  </label>
                 </div>
                 <input
                   value={enterpriseDraft.baseUrl}
@@ -4518,6 +4543,9 @@ export function App() {
                     </code>
                     <code>
                       tls: {String(enterpriseSettings.controlPlane.requireTls)} | localhost-http: {String(enterpriseSettings.controlPlane.allowInsecureLocalhost)}
+                    </code>
+                    <code>
+                      security mode: {enterpriseSettings.security.mode}
                     </code>
                   </>
                 ) : (

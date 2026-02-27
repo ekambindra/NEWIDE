@@ -26,15 +26,17 @@ import {
 } from "@ide/indexer";
 import ts from "typescript";
 import {
-  detectCommandRisk,
   parseTestOutput,
   type CommandRiskAssessment,
   type ParsedTestSummary
 } from "./terminal-utils.js";
+import { isAllowedRendererNavigation } from "./navigation-security.js";
+import { evaluateTerminalPolicy } from "./terminal-policy.js";
 import {
   redactAuditValue,
   scanSecretFindings
 } from "./security-utils.js";
+import { resolveWorkspacePath } from "./workspace-security.js";
 import {
   buildProjectTemplate,
   type ProjectBuilderResult
@@ -53,6 +55,7 @@ import {
 import {
   createEnterpriseSettingsManager,
   type EnterpriseSettings,
+  type SecurityMode,
   type TelemetryConsent,
   type UpdateControlPlaneInput
 } from "./enterprise-settings.js";
@@ -407,6 +410,7 @@ const terminalSessions = new Map<string, TerminalSession>();
 const workspaceIndexer = new SymbolIndexer();
 const workspaceIndexReports = new Map<string, WorkspaceIndexReport>();
 const MAX_FILE_BYTES = 1024 * 1024 * 2;
+let runtimeSecurityMode: SecurityMode = "balanced";
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -450,11 +454,6 @@ function benchmarkReportPath(): string {
 
 function benchmarkMetricsPath(): string {
   return join(runtimeDataRoot(), "benchmark", "metrics.jsonl");
-}
-
-function isWithin(root: string, target: string): boolean {
-  const rel = relative(root, target);
-  return rel === "" || (!rel.startsWith("..") && !resolve(root, rel).startsWith(".."));
 }
 
 function normalizeLf(text: string): string {
@@ -503,19 +502,6 @@ function canonicalManifestPayload(manifest: Omit<DiffPatchManifest, "payloadHash
     afterHash: manifest.afterHash,
     appliedChunks: manifest.appliedChunks
   });
-}
-
-function commandPolicy(command: string): PolicyResult {
-  if (/rm\s+-rf/.test(command) || /:\(\)\s*\{/.test(command)) {
-    return { decision: "deny", reason: "destructive command blocked" };
-  }
-  if (/curl|wget|npm\s+install|pnpm\s+add|yarn\s+add/.test(command)) {
-    return {
-      decision: "require_approval",
-      reason: "network or dependency action requires approval"
-    };
-  }
-  return { decision: "allow", reason: "allowed by balanced policy" };
 }
 
 function defaultPipelineCommands(): Record<PipelineStageName, string> {
@@ -1313,10 +1299,7 @@ function detectBinary(buffer: Buffer): boolean {
 }
 
 async function safeRead(root: string, relPath: string): Promise<ReadFileResult> {
-  const absolute = resolve(root, relPath);
-  if (!isWithin(root, absolute)) {
-    throw new Error("path traversal denied");
-  }
+  const absolute = await resolveWorkspacePath(root, relPath);
 
   const stats = statSync(absolute);
   const fileSize = stats.size;
@@ -1344,10 +1327,7 @@ async function safeRead(root: string, relPath: string): Promise<ReadFileResult> 
 }
 
 async function safeWrite(root: string, relPath: string, content: string): Promise<void> {
-  const absolute = resolve(root, relPath);
-  if (!isWithin(root, absolute)) {
-    throw new Error("path traversal denied");
-  }
+  const absolute = await resolveWorkspacePath(root, relPath, { allowMissing: true });
 
   await fs.mkdir(resolve(absolute, ".."), { recursive: true });
   await fs.writeFile(absolute, normalizeLf(content), "utf8");
@@ -1649,21 +1629,6 @@ async function executeCommand(root: string, command: string): Promise<{ exitCode
   }
 }
 
-function evaluateTerminalPolicy(command: string): {
-  policy: PolicyResult;
-  highRisk: CommandRiskAssessment;
-} {
-  const highRisk = detectCommandRisk(command);
-  let policy = commandPolicy(command);
-  if (policy.decision === "allow" && highRisk.requiresApproval) {
-    policy = {
-      decision: "require_approval",
-      reason: highRisk.prompt ?? "high-risk command requires approval"
-    };
-  }
-  return { policy, highRisk };
-}
-
 async function startTerminalSession(
   root: string,
   command: string
@@ -1679,7 +1644,7 @@ async function startTerminalSession(
     };
   }
 
-  const { policy, highRisk } = evaluateTerminalPolicy(trimmed);
+  const { policy, highRisk } = evaluateTerminalPolicy(trimmed, runtimeSecurityMode);
   if (policy.decision === "deny") {
     return {
       sessionId: null,
@@ -2391,14 +2356,7 @@ async function runPipeline(
       continue;
     }
 
-    const highRisk = detectCommandRisk(command);
-    let policy = commandPolicy(command);
-    if (policy.decision === "allow" && highRisk.requiresApproval) {
-      policy = {
-        decision: "require_approval",
-        reason: highRisk.prompt ?? "high-risk command requires approval"
-      };
-    }
+    const { highRisk, policy } = evaluateTerminalPolicy(command, runtimeSecurityMode);
 
     if (policy.decision === "deny") {
       stages.push({
@@ -2559,6 +2517,7 @@ async function replayTerminal(limit: number): Promise<Array<{ runId: string; com
 
 async function createWindow(): Promise<void> {
   const preloadPath = resolvePreloadPath();
+  const devUrl = process.env.VITE_DEV_SERVER_URL;
   const win = new BrowserWindow({
     width: 1600,
     height: 980,
@@ -2574,11 +2533,66 @@ async function createWindow(): Promise<void> {
     }
   });
 
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    void appendAuditEvent({
+      action: "security.window_open",
+      target: url,
+      decision: "deny",
+      reason: "renderer popup blocked",
+      metadata: { source: "setWindowOpenHandler" }
+    });
+    return { action: "deny" };
+  });
+
+  win.webContents.on("will-attach-webview", (event) => {
+    event.preventDefault();
+    void appendAuditEvent({
+      action: "security.webview_attach",
+      target: "webview",
+      decision: "deny",
+      reason: "webview attach blocked",
+      metadata: { source: "will-attach-webview" }
+    });
+  });
+
+  win.webContents.on("will-navigate", (event, targetUrl) => {
+    if (isAllowedRendererNavigation(targetUrl, devUrl)) {
+      return;
+    }
+    event.preventDefault();
+    void appendAuditEvent({
+      action: "security.navigation",
+      target: targetUrl,
+      decision: "deny",
+      reason: "navigation target blocked",
+      metadata: { devUrl: devUrl ?? null }
+    });
+  });
+
+  win.webContents.session.setPermissionRequestHandler((_, permission, callback, details) => {
+    callback(false);
+    const detailRecord = details as {
+      requestingUrl?: string;
+      isMainFrame?: boolean;
+      mediaTypes?: string[];
+    };
+    void appendAuditEvent({
+      action: "security.permission_request",
+      target: permission,
+      decision: "deny",
+      reason: "renderer permission denied",
+      metadata: {
+        requestingUrl: detailRecord?.requestingUrl ?? null,
+        isMainFrame: detailRecord?.isMainFrame ?? null,
+        mediaTypes: detailRecord?.mediaTypes ?? []
+      }
+    });
+  });
+
   win.webContents.on("preload-error", (_event, failedPreloadPath, error) => {
     process.stderr.write(`[preload-error] path=${failedPreloadPath} message=${error.message}\n`);
   });
 
-  const devUrl = process.env.VITE_DEV_SERVER_URL;
   if (devUrl) {
     await win.loadURL(devUrl);
   } else {
@@ -2605,6 +2619,7 @@ app.whenReady().then(async () => {
   await authManager.initialize();
   const enterpriseSettingsManager = createEnterpriseSettingsManager(runtimeDataRoot());
   await enterpriseSettingsManager.initialize();
+  runtimeSecurityMode = (await enterpriseSettingsManager.getSettings()).security.mode;
   const controlPlaneClient = createControlPlaneClient(
     runtimeDataRoot(),
     enterpriseSettingsManager
@@ -2783,10 +2798,7 @@ app.whenReady().then(async () => {
 
   ipcMain.handle("file:create", async (_event, root: string, relPath: string, isDirectory: boolean) => {
     const { actor } = await requireAuthorization("workspace.write");
-    const absolute = resolve(root, relPath);
-    if (!isWithin(root, absolute)) {
-      throw new Error("path traversal denied");
-    }
+    const absolute = await resolveWorkspacePath(root, relPath, { allowMissing: true });
     if (isDirectory) {
       await fs.mkdir(absolute, { recursive: true });
     } else {
@@ -2806,11 +2818,8 @@ app.whenReady().then(async () => {
 
   ipcMain.handle("file:rename", async (_event, root: string, fromPath: string, toPath: string) => {
     const { actor } = await requireAuthorization("workspace.write");
-    const fromAbs = resolve(root, fromPath);
-    const toAbs = resolve(root, toPath);
-    if (!isWithin(root, fromAbs) || !isWithin(root, toAbs)) {
-      throw new Error("path traversal denied");
-    }
+    const fromAbs = await resolveWorkspacePath(root, fromPath);
+    const toAbs = await resolveWorkspacePath(root, toPath, { allowMissing: true });
     await fs.mkdir(resolve(toAbs, ".."), { recursive: true });
     await fs.rename(fromAbs, toAbs);
     await appendAuditEvent({
@@ -2826,10 +2835,7 @@ app.whenReady().then(async () => {
 
   ipcMain.handle("file:delete", async (_event, root: string, relPath: string) => {
     const { actor } = await requireAuthorization("workspace.write");
-    const absolute = resolve(root, relPath);
-    if (!isWithin(root, absolute)) {
-      throw new Error("path traversal denied");
-    }
+    const absolute = await resolveWorkspacePath(root, relPath, { allowMissing: true });
     await fs.rm(absolute, { recursive: true, force: true });
     await appendAuditEvent({
       actor,
@@ -2995,7 +3001,7 @@ app.whenReady().then(async () => {
   });
 
   ipcMain.handle("terminal:run", async (_event, root: string, command: string): Promise<TerminalResult> => {
-    const { highRisk, policy } = evaluateTerminalPolicy(command);
+    const { highRisk, policy } = evaluateTerminalPolicy(command, runtimeSecurityMode);
 
     if (policy.decision === "deny") {
       await appendAuditEvent({
@@ -3104,8 +3110,7 @@ app.whenReady().then(async () => {
 
   ipcMain.handle("terminal:run-approved", async (_event, root: string, command: string): Promise<TerminalResult> => {
     const { actor } = await requireAuthorization("terminal.approved_run");
-    const { highRisk } = evaluateTerminalPolicy(command);
-    const policy = commandPolicy(command);
+    const { highRisk, policy } = evaluateTerminalPolicy(command, runtimeSecurityMode);
     if (policy.decision === "deny") {
       await appendAuditEvent({
         actor,
@@ -3447,7 +3452,9 @@ app.whenReady().then(async () => {
   });
 
   ipcMain.handle("enterprise:settings:get", async (): Promise<EnterpriseSettings> => {
-    return enterpriseSettingsManager.getSettings();
+    const settings = await enterpriseSettingsManager.getSettings();
+    runtimeSecurityMode = settings.security.mode;
+    return settings;
   });
 
   ipcMain.handle(
@@ -3540,6 +3547,35 @@ app.whenReady().then(async () => {
           base_url: settings.controlPlane.baseUrl,
           require_tls: settings.controlPlane.requireTls,
           allow_insecure_localhost: settings.controlPlane.allowInsecureLocalhost
+        }
+      });
+      return settings;
+    }
+  );
+
+  ipcMain.handle(
+    "enterprise:security-mode:update",
+    async (
+      _event,
+      payload: {
+        mode?: SecurityMode;
+      }
+    ): Promise<EnterpriseSettings> => {
+      const { actor } = await requireAuthorization("auth.manage");
+      const mode = payload.mode ?? "balanced";
+      if (mode !== "balanced" && mode !== "strict") {
+        throw new Error("invalid security mode");
+      }
+      const settings = await enterpriseSettingsManager.updateSecurityMode(mode);
+      runtimeSecurityMode = settings.security.mode;
+      await appendAuditEvent({
+        actor,
+        action: "enterprise.security_mode.update",
+        target: settings.security.mode,
+        decision: "executed",
+        reason: "security mode updated",
+        metadata: {
+          security_mode: settings.security.mode
         }
       });
       return settings;

@@ -15,6 +15,13 @@ export type CommandRiskAssessment = {
   prompt: string | null;
 };
 
+export type CommandValidationResult = {
+  valid: boolean;
+  reason: string | null;
+};
+
+const MAX_COMMAND_LENGTH = 4000;
+
 function parseNumericSignals(output: string): {
   passed: number;
   failed: number;
@@ -77,6 +84,38 @@ function parseJUnit(output: string): ParsedTestSummary | null {
 
 function likelyTestCommand(command: string): boolean {
   return /\b(test|vitest|jest|pytest|junit)\b/i.test(command);
+}
+
+export function validateCommandInput(command: string): CommandValidationResult {
+  const trimmed = command.trim();
+  if (!trimmed) {
+    return {
+      valid: false,
+      reason: "empty command"
+    };
+  }
+  if (trimmed.length > MAX_COMMAND_LENGTH) {
+    return {
+      valid: false,
+      reason: "command too long"
+    };
+  }
+  if (/[^\S\r\n]*[\r\n]+/.test(command)) {
+    return {
+      valid: false,
+      reason: "multiline command blocked"
+    };
+  }
+  if (/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/.test(command)) {
+    return {
+      valid: false,
+      reason: "control characters blocked"
+    };
+  }
+  return {
+    valid: true,
+    reason: null
+  };
 }
 
 export function parseTestOutput(

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { detectCommandRisk, parseTestOutput } from "./terminal-utils.js";
+import { detectCommandRisk, parseTestOutput, validateCommandInput } from "./terminal-utils.js";
 
 describe("terminal utils", () => {
   it("parses vitest output", () => {
@@ -39,5 +39,11 @@ describe("terminal utils", () => {
     expect(risk.categories).toContain("dependency");
     expect(risk.categories).toContain("network");
     expect(risk.prompt).toContain("Approval required");
+  });
+
+  it("blocks multiline and control-character commands", () => {
+    expect(validateCommandInput("npm run lint\nrm -rf /").valid).toBe(false);
+    expect(validateCommandInput("echo ok\u0000oops").valid).toBe(false);
+    expect(validateCommandInput("npm run test").valid).toBe(true);
   });
 });
