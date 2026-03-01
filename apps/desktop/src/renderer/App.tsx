@@ -610,6 +610,7 @@ const slashHelpEntries: Array<{ command: string; description: string }> = [
   { command: "/pipeline", description: "Run lint/typecheck/test/build" },
   { command: "/build <name>", description: "Generate backend template" },
   { command: "/refactor <from> <to>", description: "Preview refactor rename" },
+  { command: "/security <balanced|strict>", description: "Set runtime command security mode" },
   { command: "/diff", description: "Open diff review panel" },
   { command: "/checkpoints", description: "Open checkpoint timeline" }
 ];
@@ -1119,6 +1120,8 @@ export function App() {
       { value: "/pipeline", label: "Run Pipeline", description: "Run lint, typecheck, test, and build" },
       { value: "/build Atlas Website Stack", label: "Build Backend Template", description: "Generate Node microservices + Postgres stack" },
       { value: "/refactor runTask executeTask", label: "Refactor Symbol", description: "Preview a cross-file rename operation" },
+      { value: "/security strict", label: "Security Strict", description: "Block network/dependency commands outright" },
+      { value: "/security balanced", label: "Security Balanced", description: "Allow with approval gates for risky commands" },
       { value: "/agent", label: "Open Agent Panel", description: "Show agent orchestration panel" },
       { value: "/diff", label: "Open Diff Panel", description: "Review patch queue and chunk decisions" },
       { value: "/checkpoints", label: "Open Checkpoints", description: "Inspect and replay checkpoint artifacts" },
@@ -2515,6 +2518,18 @@ export function App() {
     }
   };
 
+  const setSecurityMode = async (mode: SecurityMode) => {
+    try {
+      await window.ide.updateSecurityMode({ mode });
+      setEnterpriseDraft((current) => ({ ...current, securityMode: mode }));
+      await Promise.all([refreshEnterpriseSettings(), refreshAudit()]);
+      setLogs((prev) => [`[enterprise] security mode set to ${mode}`, ...prev].slice(0, 200));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "failed to set security mode";
+      setLogs((prev) => [`[enterprise] security mode error: ${message}`, ...prev].slice(0, 200));
+    }
+  };
+
   const runControlPlaneHealthCheck = async () => {
     try {
       const result = await window.ide.controlPlaneHealthCheck();
@@ -2962,7 +2977,7 @@ export function App() {
 
     if (command === "/help") {
       setLogs((prev) => [
-        "[workflow] commands: /open, /search <query>, /run <cmd>, /pipeline, /build <name>, /refactor <from> <to>, /agent, /plan, /diff, /checkpoints, /files, /terminal, /tests, /logs, /editor",
+        "[workflow] commands: /open, /search <query>, /run <cmd>, /pipeline, /build <name>, /refactor <from> <to>, /security <balanced|strict>, /agent, /plan, /diff, /checkpoints, /files, /terminal, /tests, /logs, /editor",
         "[workflow] freeform prompts run in multi-agent mode automatically",
         ...prev
       ].slice(0, 200));
@@ -3023,6 +3038,17 @@ export function App() {
     }
     if (command === "/logs") {
       toggleBottomFeature("logs");
+      return;
+    }
+
+    if (command.startsWith("/security")) {
+      const value = request.replace(/^\/security\s*/i, "").trim().toLowerCase();
+      const mode = value === "strict" ? "strict" : value === "balanced" ? "balanced" : null;
+      if (!mode) {
+        setLogs((prev) => ["[workflow] usage: /security <balanced|strict>", ...prev].slice(0, 200));
+        return;
+      }
+      await setSecurityMode(mode);
       return;
     }
 
@@ -3326,6 +3352,18 @@ export function App() {
             </div>
             <div className="codex-main-actions">
               <span className={`run-badge ${runState}`}>{runState.toUpperCase()}</span>
+              <button
+                className={enterpriseDraft.securityMode === "strict" ? "active" : ""}
+                onClick={() => { void setSecurityMode("strict"); }}
+              >
+                Strict
+              </button>
+              <button
+                className={enterpriseDraft.securityMode === "balanced" ? "active" : ""}
+                onClick={() => { void setSecurityMode("balanced"); }}
+              >
+                Balanced
+              </button>
               <button onClick={() => { void openWorkspace(); }}>Open</button>
               <button
                 onClick={() => {
@@ -3387,6 +3425,7 @@ export function App() {
               <code>workspace: {workspaceRoot ?? "none"}</code>
               <code>turns: {workflowHistory.length}</code>
               <code>changes: {filteredChangeCards.length} files</code>
+              <code>security mode: {enterpriseDraft.securityMode}</code>
               <code>active: {active?.path ?? "none"}</code>
             </div>
             <div className="codex-turn-card">

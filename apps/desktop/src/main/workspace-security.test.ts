@@ -13,6 +13,26 @@ async function createSymlink(target: string, path: string, type: "file" | "dir")
 }
 
 describe("workspace path security", () => {
+  it("blocks relative traversal segments", async () => {
+    const base = await mkdtemp(join(tmpdir(), "atlas-workspace-sec-traversal-"));
+    const root = join(base, "root");
+    await mkdir(root, { recursive: true });
+
+    await expect(
+      resolveWorkspacePath(root, "../outside.txt", { allowMissing: true })
+    ).rejects.toThrow(/path traversal denied/i);
+  });
+
+  it("blocks absolute paths outside the workspace root", async () => {
+    const base = await mkdtemp(join(tmpdir(), "atlas-workspace-sec-abs-"));
+    const root = join(base, "root");
+    const outside = join(base, "outside.txt");
+    await mkdir(root, { recursive: true });
+    await writeFile(outside, "outside", "utf8");
+
+    await expect(resolveWorkspacePath(root, outside)).rejects.toThrow(/path traversal denied/i);
+  });
+
   it("blocks file symlink escapes outside workspace root", async () => {
     const base = await mkdtemp(join(tmpdir(), "atlas-workspace-sec-file-"));
     const root = join(base, "root");
