@@ -464,6 +464,18 @@ function hashText(text: string): string {
   return createHash("sha256").update(text).digest("hex");
 }
 
+function getPathSecurityReason(error: unknown): string | null {
+  const message =
+    error instanceof Error ? error.message : typeof error === "string" ? error : "";
+  if (/path traversal denied/i.test(message)) {
+    return "path traversal denied";
+  }
+  if (/symlink escape denied/i.test(message)) {
+    return "symlink escape denied";
+  }
+  return null;
+}
+
 let cachedPatchSigningSecret: string | null = null;
 
 async function getPatchSigningSecret(): Promise<string> {
@@ -2655,6 +2667,26 @@ app.whenReady().then(async () => {
     };
   }
 
+  async function auditPathEscapeAttempt(input: {
+    actor?: string;
+    operation: string;
+    root: string;
+    target: string;
+    reason: string;
+  }): Promise<void> {
+    await appendAuditEvent({
+      actor: input.actor,
+      action: "security.path_escape",
+      target: input.target,
+      decision: "deny",
+      reason: input.reason,
+      metadata: {
+        operation: input.operation,
+        root: input.root
+      }
+    });
+  }
+
   ipcMain.handle("workspace:open", async () => {
     const result = await dialog.showOpenDialog({
       properties: ["openDirectory"]
@@ -2690,12 +2722,39 @@ app.whenReady().then(async () => {
   });
 
   ipcMain.handle("file:read", async (_event, root: string, relPath: string) => {
-    return safeRead(root, relPath);
+    try {
+      return await safeRead(root, relPath);
+    } catch (error) {
+      const reason = getPathSecurityReason(error);
+      if (reason) {
+        await auditPathEscapeAttempt({
+          operation: "file.read",
+          root,
+          target: relPath,
+          reason
+        });
+      }
+      throw error;
+    }
   });
 
   ipcMain.handle("file:write", async (_event, root: string, relPath: string, content: string) => {
     const { actor } = await requireAuthorization("workspace.write");
-    await safeWrite(root, relPath, content);
+    try {
+      await safeWrite(root, relPath, content);
+    } catch (error) {
+      const reason = getPathSecurityReason(error);
+      if (reason) {
+        await auditPathEscapeAttempt({
+          actor,
+          operation: "file.write",
+          root,
+          target: relPath,
+          reason
+        });
+      }
+      throw error;
+    }
     await appendAuditEvent({
       actor,
       action: "file.write",
@@ -2798,12 +2857,26 @@ app.whenReady().then(async () => {
 
   ipcMain.handle("file:create", async (_event, root: string, relPath: string, isDirectory: boolean) => {
     const { actor } = await requireAuthorization("workspace.write");
-    const absolute = await resolveWorkspacePath(root, relPath, { allowMissing: true });
-    if (isDirectory) {
-      await fs.mkdir(absolute, { recursive: true });
-    } else {
-      await fs.mkdir(resolve(absolute, ".."), { recursive: true });
-      await fs.writeFile(absolute, "", "utf8");
+    try {
+      const absolute = await resolveWorkspacePath(root, relPath, { allowMissing: true });
+      if (isDirectory) {
+        await fs.mkdir(absolute, { recursive: true });
+      } else {
+        await fs.mkdir(resolve(absolute, ".."), { recursive: true });
+        await fs.writeFile(absolute, "", "utf8");
+      }
+    } catch (error) {
+      const reason = getPathSecurityReason(error);
+      if (reason) {
+        await auditPathEscapeAttempt({
+          actor,
+          operation: "file.create",
+          root,
+          target: relPath,
+          reason
+        });
+      }
+      throw error;
     }
     await appendAuditEvent({
       actor,
@@ -2818,10 +2891,24 @@ app.whenReady().then(async () => {
 
   ipcMain.handle("file:rename", async (_event, root: string, fromPath: string, toPath: string) => {
     const { actor } = await requireAuthorization("workspace.write");
-    const fromAbs = await resolveWorkspacePath(root, fromPath);
-    const toAbs = await resolveWorkspacePath(root, toPath, { allowMissing: true });
-    await fs.mkdir(resolve(toAbs, ".."), { recursive: true });
-    await fs.rename(fromAbs, toAbs);
+    try {
+      const fromAbs = await resolveWorkspacePath(root, fromPath);
+      const toAbs = await resolveWorkspacePath(root, toPath, { allowMissing: true });
+      await fs.mkdir(resolve(toAbs, ".."), { recursive: true });
+      await fs.rename(fromAbs, toAbs);
+    } catch (error) {
+      const reason = getPathSecurityReason(error);
+      if (reason) {
+        await auditPathEscapeAttempt({
+          actor,
+          operation: "file.rename",
+          root,
+          target: `${fromPath} -> ${toPath}`,
+          reason
+        });
+      }
+      throw error;
+    }
     await appendAuditEvent({
       actor,
       action: "file.rename",
@@ -2835,8 +2922,22 @@ app.whenReady().then(async () => {
 
   ipcMain.handle("file:delete", async (_event, root: string, relPath: string) => {
     const { actor } = await requireAuthorization("workspace.write");
-    const absolute = await resolveWorkspacePath(root, relPath, { allowMissing: true });
-    await fs.rm(absolute, { recursive: true, force: true });
+    try {
+      const absolute = await resolveWorkspacePath(root, relPath, { allowMissing: true });
+      await fs.rm(absolute, { recursive: true, force: true });
+    } catch (error) {
+      const reason = getPathSecurityReason(error);
+      if (reason) {
+        await auditPathEscapeAttempt({
+          actor,
+          operation: "file.delete",
+          root,
+          target: relPath,
+          reason
+        });
+      }
+      throw error;
+    }
     await appendAuditEvent({
       actor,
       action: "file.delete",
